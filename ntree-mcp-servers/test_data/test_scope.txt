@@ -1,0 +1,8 @@
+# Test Scope
+192.168.1.0/24
+10.0.0.0/28
+example.com
+*.test.local
+
+# Excluded
+EXCLUDE 192.168.1.1

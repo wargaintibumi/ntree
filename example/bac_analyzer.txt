@@ -1,0 +1,1741 @@
+"""
+Claude-powered BAC/IDOR Analyzer with interactive data request flow.
+Uses ClaudeSDKClient for AI-powered analysis with state management.
+"""
+
+from typing import Dict, Any, Optional
+from pathlib import Path
+import json
+import os
+import logging
+import traceback
+from datetime import datetime
+
+# Claude Code SDK imports
+try:
+    from claude_code_sdk import ClaudeSDKClient, ClaudeCodeOptions
+except ImportError:
+    print("⚠️  Warning: claude-code-sdk not installed. Install with: pip install claude-code-sdk")
+    ClaudeSDKClient = None
+    ClaudeCodeOptions = None
+
+from api.models.schemas import (
+    Analysis, AnalysisStatus, DataRequest, AuthProfile,
+    BACTest, Finding, VulnerabilityType
+)
+
+
+class AnalysisLogger:
+    """Logger for capturing all Claude interactions"""
+    
+    def __init__(self, analysis_id: str, base_dir: Path):
+        self.analysis_id = analysis_id
+        self.log_dir = base_dir / analysis_id / "logs"
+        self.log_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Setup file handlers
+        self.query_log = self.log_dir / "queries.log"
+        self.response_log = self.log_dir / "responses.log"
+        self.error_log = self.log_dir / "errors.log"
+        self.debug_log = self.log_dir / "debug.log"
+        
+        # Python logging setup
+        self.logger = logging.getLogger(f"analysis_{analysis_id}")
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Remove existing handlers to avoid duplicates
+        self.logger.handlers = []
+        
+        fh = logging.FileHandler(self.debug_log)
+        fh.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        fh.setFormatter(formatter)
+        self.logger.addHandler(fh)
+        
+        # Also log to console
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(formatter)
+        self.logger.addHandler(ch)
+    
+    def log_query(self, prompt: str):
+        """Log Claude query"""
+        timestamp = datetime.now().isoformat()
+        with open(self.query_log, 'a') as f:
+            f.write(f"\n{'='*80}\n")
+            f.write(f"QUERY AT {timestamp}\n")
+            f.write(f"{'='*80}\n")
+            f.write(prompt)
+            f.write(f"\n{'='*80}\n\n")
+        self.logger.info(f"Sent query ({len(prompt)} chars)")
+    
+    def log_response(self, response: str):
+        """Log Claude response"""
+        timestamp = datetime.now().isoformat()
+        with open(self.response_log, 'a') as f:
+            f.write(f"\n{'='*80}\n")
+            f.write(f"RESPONSE AT {timestamp}\n")
+            f.write(f"{'='*80}\n")
+            f.write(response)
+            f.write(f"\n{'='*80}\n\n")
+        self.logger.info(f"Received response ({len(response)} chars)")
+    
+    def log_error(self, error: Exception, context: str = ""):
+        """Log error with full traceback"""
+        timestamp = datetime.now().isoformat()
+        tb = traceback.format_exc()
+        
+        with open(self.error_log, 'a') as f:
+            f.write(f"\n{'='*80}\n")
+            f.write(f"ERROR AT {timestamp}\n")
+            f.write(f"Context: {context}\n")
+            f.write(f"{'='*80}\n")
+            f.write(f"Error: {str(error)}\n")
+            f.write(f"Traceback:\n{tb}\n")
+            f.write(f"{'='*80}\n\n")
+        self.logger.error(f"{context}: {str(error)}")
+    
+    def log_message(self, message: str, level: str = "info"):
+        """Log a general message"""
+        if level == "debug":
+            self.logger.debug(message)
+        elif level == "warning":
+            self.logger.warning(message)
+        elif level == "error":
+            self.logger.error(message)
+        else:
+            self.logger.info(message)
+
+
+class ClaudeBACAnalyzer:
+    """
+    Interactive BAC/IDOR analyzer using ClaudeSDKClient.
+    
+    Features:
+    - Detects authorization mechanisms
+    - Requests additional user tokens when needed
+    - Generates and executes BAC/IDOR tests
+    - Analyzes responses for access control violations
+    """
+    
+    def __init__(self, work_dir: str = None):
+        """
+        Initialize Claude BAC Analyzer.
+        
+        Args:
+            work_dir: Working directory for Claude sessions
+        """
+        self.work_dir = Path(work_dir or os.getenv("CLAUDE_WORK_DIR", "./analysis_workdir"))
+        self.work_dir.mkdir(exist_ok=True, parents=True)
+        self.prompts_dir = Path(__file__).parent.parent.parent / "prompts"
+        self.logger = None  # Will be set per analysis
+    
+    async def analyze(self, analysis: Analysis) -> Analysis:
+        """
+        Perform BAC/IDOR analysis on a request.
+        
+        Args:
+            analysis: Analysis object with initial request
+            
+        Returns:
+            Updated analysis object with results or data requests
+        """
+        # Create logger for this analysis
+        self.logger = AnalysisLogger(analysis.id, self.work_dir)
+        
+        if not ClaudeSDKClient:
+            analysis.status = AnalysisStatus.FAILED
+            analysis.error = "ClaudeSDKClient not available"
+            self.logger.log_error(Exception("ClaudeSDKClient not available"), "Initialization")
+            return analysis
+        
+        # Create session working directory
+        session_dir = self.work_dir / analysis.id
+        session_dir.mkdir(exist_ok=True)
+        
+        self.logger.log_message("Starting BAC/IDOR analysis")
+        self.logger.log_message(f"Target: {analysis.target_url}", "debug")
+        self.logger.log_message(f"Method: {analysis.request.method}", "debug")
+        
+        # Save HTTP client tool for Claude to use
+        self._setup_http_tool(session_dir)
+        self.logger.log_message("HTTP tool setup complete", "debug")
+        
+        try:
+            # Add Claude CLI to PATH if needed
+            claude_cli_dir = os.path.expanduser(
+                os.getenv("CLAUDE_CLI_DIR", "~/.claude/local")
+            )
+            if claude_cli_dir and os.path.exists(claude_cli_dir):
+                os.environ["PATH"] = f"{claude_cli_dir}:{os.environ.get('PATH', '')}"
+                self.logger.log_message(f"Added to PATH: {claude_cli_dir}", "debug")
+            
+            # Configure Claude options with MCP server for HTTP requests
+            mcp_server_path = str(Path(__file__).parent.parent.parent / "integrations" / "mcp_server.py")
+            
+            options = ClaudeCodeOptions(
+                cwd=str(session_dir),
+                allowed_tools=[
+                    "Bash", "Glob", "Grep", "LS", "Read", "Write",
+                    "Edit", "MultiEdit", "exit_plan_mode",
+                    # MCP tools for HTTP requests
+                    "mcp__paintester-http__http_request",
+                    "mcp__paintester-http__send_bac_test",
+                    "mcp__paintester-http__send_idor_test",
+                    "mcp__paintester-http__compare_responses"
+                ],
+                permission_mode="acceptEdits",
+                mcp_servers={
+                    "paintester-http": {
+                        "command": "python",
+                        "args": [mcp_server_path],
+                        "env": {}
+                    }
+                }
+            )
+            
+            # Create Claude session
+            self.logger.log_message("Creating Claude session")
+            async with ClaudeSDKClient(options=options) as client:
+                analysis.claude_session_id = str(id(client))
+                self.logger.log_message(f"Claude session created: {analysis.claude_session_id}", "debug")
+                
+                # Initial analysis phase
+                prompt = self._build_initial_prompt(analysis)
+                self.logger.log_query(prompt)
+                
+                self.logger.log_message("Sending query to Claude")
+                await client.query(prompt)
+                
+                # Process Claude's response
+                self.logger.log_message("Collecting response from Claude")
+                response_text = await self._collect_response(client)
+                self.logger.log_response(response_text)
+                
+                self.logger.log_message("Parsing Claude response")
+                result = self._parse_claude_response(response_text)
+                
+                # Handle different outcomes
+                if result.get("status") == "need_more_data":
+                    self.logger.log_message("Claude needs more data")
+                    analysis = self._handle_data_request(analysis, result)
+                    self._save_analysis_state(analysis, session_dir)
+                    return analysis
+                
+                elif result.get("status") == "ready_to_test":
+                    self.logger.log_message("Claude ready to test")
+                    # Extract auth profile
+                    if "auth_profile" in result:
+                        analysis.auth_profile = AuthProfile(**result["auth_profile"])
+                        self.logger.log_message(f"Auth profile extracted: {analysis.auth_profile.auth_type}", "debug")
+                    
+                    # Proceed to testing phase
+                    analysis = await self._execute_testing_phase(client, analysis, result)
+                    self._save_analysis_state(analysis, session_dir)
+                    return analysis
+                
+                else:
+                    # Unexpected response
+                    self.logger.log_message(f"Unexpected status: {result.get('status', 'unknown')}", "warning")
+                    analysis.ai_analysis = response_text
+                    analysis.status = AnalysisStatus.COMPLETED
+                    self._save_analysis_state(analysis, session_dir)
+                    return analysis
+        
+        except Exception as e:
+            self.logger.log_error(e, "Analysis failed during Claude interaction")
+            analysis.status = AnalysisStatus.FAILED
+            analysis.error = f"{type(e).__name__}: {str(e)}"
+            self._save_analysis_state(analysis, session_dir)
+            return analysis
+    
+    async def continue_analysis(self, analysis: Analysis) -> Analysis:
+        """
+        Continue analysis after additional data is provided.
+        
+        Args:
+            analysis: Analysis with additional related_requests
+            
+        Returns:
+            Updated analysis object
+        """
+        # Create logger for this analysis
+        self.logger = AnalysisLogger(analysis.id, self.work_dir)
+        
+        if not ClaudeSDKClient:
+            analysis.status = AnalysisStatus.FAILED
+            analysis.error = "ClaudeSDKClient not available"
+            self.logger.log_error(Exception("ClaudeSDKClient not available"), "Continue Analysis")
+            return analysis
+        
+        session_dir = self.work_dir / analysis.id
+        self.logger.log_message("Continuing analysis with additional context")
+        
+        try:
+            # Add Claude CLI to PATH if needed
+            claude_cli_dir = os.path.expanduser(
+                os.getenv("CLAUDE_CLI_DIR", "~/.claude/local")
+            )
+            if claude_cli_dir and os.path.exists(claude_cli_dir):
+                os.environ["PATH"] = f"{claude_cli_dir}:{os.environ.get('PATH', '')}"
+                self.logger.log_message(f"Added to PATH: {claude_cli_dir}", "debug")
+            
+            # Configure Claude options with MCP server for HTTP requests
+            mcp_server_path = str(Path(__file__).parent.parent.parent / "integrations" / "mcp_server.py")
+            
+            options = ClaudeCodeOptions(
+                cwd=str(session_dir),
+                allowed_tools=[
+                    "Bash", "Glob", "Grep", "LS", "Read", "Write",
+                    "Edit", "MultiEdit", "exit_plan_mode",
+                    # MCP tools for HTTP requests
+                    "mcp__paintester-http__http_request",
+                    "mcp__paintester-http__send_bac_test",
+                    "mcp__paintester-http__send_idor_test",
+                    "mcp__paintester-http__compare_responses"
+                ],
+                permission_mode="acceptEdits",
+                mcp_servers={
+                    "paintester-http": {
+                        "command": "python",
+                        "args": [mcp_server_path],
+                        "env": {}
+                    }
+                }
+            )
+            
+            async with ClaudeSDKClient(options=options) as client:
+                # Build continuation prompt with new context
+                prompt = self._build_continuation_prompt(analysis)
+                self.logger.log_query(prompt)
+                
+                self.logger.log_message("Sending continuation query to Claude")
+                await client.query(prompt)
+                
+                # Collect response
+                self.logger.log_message("Collecting continuation response")
+                response_text = await self._collect_response(client)
+                self.logger.log_response(response_text)
+                
+                result = self._parse_claude_response(response_text)
+                
+                # Should now be ready to test
+                if result.get("status") == "ready_to_test":
+                    self.logger.log_message("Claude ready to test after continuation")
+                    if "auth_profile" in result:
+                        analysis.auth_profile = AuthProfile(**result["auth_profile"])
+                    
+                    analysis = await self._execute_testing_phase(client, analysis, result)
+                    self._save_analysis_state(analysis, session_dir)
+                    return analysis
+                
+                else:
+                    # Store response and complete
+                    self.logger.log_message("Analysis completed after continuation")
+                    analysis.ai_analysis = response_text
+                    analysis.status = AnalysisStatus.COMPLETED
+                    self._save_analysis_state(analysis, session_dir)
+                    return analysis
+        
+        except Exception as e:
+            self.logger.log_error(e, "Continuation failed")
+            analysis.status = AnalysisStatus.FAILED
+            analysis.error = f"Continuation failed: {str(e)}"
+            self._save_analysis_state(analysis, session_dir)
+            return analysis
+    
+    async def continue_with_context(self, analysis: Analysis) -> Analysis:
+        """
+        Continue analysis with user-provided text context (incremental mode).
+        Uses three-phase deterministic testing, comparing new results against previous findings.
+        
+        Phase 1: Claude generates test cases considering user context
+        Phase 2: Python executes tests deterministically via httpx
+        Phase 3: Claude analyzes results and compares with previous findings
+        
+        Args:
+            analysis: Analysis with user_context set
+            
+        Returns:
+            Updated analysis object with refined findings
+        """
+        self.logger = AnalysisLogger(analysis.id, self.work_dir)
+        
+        if not ClaudeSDKClient:
+            analysis.status = AnalysisStatus.FAILED
+            analysis.error = "ClaudeSDKClient not available"
+            self.logger.log_error(Exception("ClaudeSDKClient not available"), "Continue with Context")
+            return analysis
+        
+        session_dir = self.work_dir / analysis.id
+        session_dir.mkdir(exist_ok=True)
+        self.logger.log_message("Continuing analysis with user-provided text context (3-phase deterministic)")
+        self.logger.log_message(f"User context: {analysis.user_context[:200]}..." if analysis.user_context and len(analysis.user_context) > 200 else f"User context: {analysis.user_context}", "debug")
+        self.logger.log_message(f"Previous findings count: {len(analysis.findings)}")
+        
+        # Store previous findings for comparison
+        previous_findings = list(analysis.findings)
+        
+        try:
+            # === PHASE 1: Generate Test Plan with User Context ===
+            self.logger.log_message("=== PHASE 1: Generating test plan with user context ===")
+            test_plan = await self._generate_test_plan_with_context(analysis, session_dir)
+            
+            if not test_plan or not test_plan.get("test_cases"):
+                self.logger.log_message("No test cases generated, keeping previous findings")
+                analysis.status = AnalysisStatus.COMPLETED
+                analysis.completed_at = datetime.utcnow()
+                self._save_analysis_state(analysis, session_dir)
+                return analysis
+            
+            self.logger.log_message(f"Generated {len(test_plan.get('test_cases', []))} test cases")
+            
+            # Save test plan
+            test_plan_path = session_dir / "test_cases.json"
+            with open(test_plan_path, 'w') as f:
+                json.dump(test_plan, f, indent=2)
+            
+            # === PHASE 2: Execute Tests Deterministically ===
+            self.logger.log_message("=== PHASE 2: Executing tests (no AI involvement) ===")
+            
+            from engine.core.test_executor import TestExecutor
+            executor = TestExecutor(analysis.id, self.work_dir)
+            test_results = executor.execute_all_tests()
+            
+            if not test_results or not test_results.get("test_results"):
+                self.logger.log_message("No test results generated, keeping previous findings")
+                analysis.status = AnalysisStatus.COMPLETED
+                analysis.completed_at = datetime.utcnow()
+                self._save_analysis_state(analysis, session_dir)
+                return analysis
+            
+            self.logger.log_message(f"Executed {len(test_results.get('test_results', []))} tests")
+            
+            # === PHASE 3: Analyze Results with Previous Findings Context ===
+            self.logger.log_message("=== PHASE 3: Analyzing test results (incremental mode) ===")
+            analysis = await self._analyze_test_results_incremental(
+                analysis, test_results, previous_findings, session_dir
+            )
+            
+            # Attach raw request/response to verified findings
+            for finding in analysis.findings:
+                if finding.source == "verified" and finding.verified_by_test_id:
+                    test_result = next(
+                        (t for t in test_results.get("test_results", [])
+                         if t.get("test_id") == finding.verified_by_test_id),
+                        None
+                    )
+                    if test_result:
+                        finding.poc_request_raw = test_result.get("request_raw")
+                        finding.poc_response_raw = test_result.get("response_raw")
+                        self.logger.log_message(
+                            f"Attached Burp-friendly PoC to finding: {finding.title[:50]}",
+                            "debug"
+                        )
+            
+            analysis.status = AnalysisStatus.COMPLETED
+            analysis.completed_at = datetime.utcnow()
+            self._save_analysis_state(analysis, session_dir)
+            
+            verified_count = sum(1 for f in analysis.findings if f.source == 'verified')
+            fp_count = sum(1 for f in analysis.findings if f.false_positive)
+            self.logger.log_message(
+                f"Incremental analysis complete: {len(analysis.findings)} findings "
+                f"({verified_count} verified, {fp_count} marked as FP)"
+            )
+            
+            return analysis
+        
+        except Exception as e:
+            self.logger.log_error(e, "Context continuation failed")
+            analysis.status = AnalysisStatus.FAILED
+            analysis.error = f"Context continuation failed: {str(e)}"
+            self._save_analysis_state(analysis, session_dir)
+            return analysis
+    
+    async def _generate_test_plan_with_context(
+        self,
+        analysis: Analysis,
+        session_dir: Path
+    ) -> Dict[str, Any]:
+        """
+        Generate test cases with user-provided context.
+        Similar to _generate_test_plan but includes user context in the prompt.
+        
+        Args:
+            analysis: Analysis object with user_context and captured traffic
+            session_dir: Session directory
+            
+        Returns:
+            Test plan dict with test_cases array
+        """
+        if not ClaudeSDKClient:
+            raise Exception("ClaudeSDKClient not available")
+        
+        # Add Claude CLI to PATH if needed
+        claude_cli_dir = os.path.expanduser(
+            os.getenv("CLAUDE_CLI_DIR", "~/.claude/local")
+        )
+        if claude_cli_dir and os.path.exists(claude_cli_dir):
+            os.environ["PATH"] = f"{claude_cli_dir}:{os.environ.get('PATH', '')}"
+        
+        # Configure Claude options - NO MCP tools for test generation
+        options = ClaudeCodeOptions(
+            cwd=str(session_dir),
+            allowed_tools=["Bash", "Glob", "Grep", "LS", "Read"],
+            permission_mode="acceptEdits"
+        )
+            
+        # Build prompt with user context
+        prompt_template = self._load_prompt("bac_generate_tests")
+        
+        # Format captured traffic
+        if analysis.request_response_pairs:
+            request_info, response_info = self._format_request_response_pairs(analysis)
+        else:
+            request_info = self._format_single_request(analysis.request)
+            response_info = self._format_single_response(analysis.response) if analysis.response else ""
+        
+        prompt = prompt_template.replace("{captured_traffic}", request_info + "\n" + response_info)
+        prompt = prompt.replace("{subdomain}", analysis.subdomain or "unknown")
+        prompt = prompt.replace("{analysis_id}", analysis.id)
+        prompt = prompt.replace("{user_context}", analysis.user_context or "(No additional context provided)")
+        
+        self.logger.log_query(prompt)
+        
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(prompt)
+            response_text = await self._collect_response(client)
+            self.logger.log_response(response_text)
+        
+        # Parse test plan
+        test_plan = self._parse_claude_response(response_text)
+        
+        # Fallback: check if Claude wrote to a file instead
+        if not test_plan.get("test_cases"):
+            test_plan_file = session_dir / "test_plan.json"
+            if test_plan_file.exists():
+                self.logger.log_message("Found test_plan.json file, loading from disk", "debug")
+                try:
+                    with open(test_plan_file) as f:
+                        test_plan = json.load(f)
+                except (json.JSONDecodeError, IOError) as e:
+                    self.logger.log_message(f"Failed to load test_plan.json: {e}", "warning")
+        
+        return test_plan
+    
+    async def _analyze_test_results_incremental(
+        self,
+        analysis: Analysis,
+        test_results: Dict[str, Any],
+        previous_findings: list,
+        session_dir: Path
+    ) -> Analysis:
+        """
+        Phase 3 (Incremental): Analyze test results and compare with previous findings.
+        
+        Handles three actions from Claude:
+        - mark_fp: Mark a previous finding as false positive
+        - update: Update an existing finding with new evidence
+        - create: Create a new finding
+        
+        Args:
+            analysis: Analysis object
+            test_results: Results from TestExecutor
+            previous_findings: List of findings from previous analysis
+            session_dir: Session directory
+            
+        Returns:
+            Updated analysis with refined findings
+        """
+        if not ClaudeSDKClient:
+            raise Exception("ClaudeSDKClient not available")
+        
+        # Add Claude CLI to PATH if needed
+        claude_cli_dir = os.path.expanduser(
+            os.getenv("CLAUDE_CLI_DIR", "~/.claude/local")
+        )
+        if claude_cli_dir and os.path.exists(claude_cli_dir):
+            os.environ["PATH"] = f"{claude_cli_dir}:{os.environ.get('PATH', '')}"
+        
+        # Configure Claude options - NO MCP tools for result analysis
+        options = ClaudeCodeOptions(
+            cwd=str(session_dir),
+            allowed_tools=["Bash", "Glob", "Grep", "LS", "Read", "Write", "Edit"],
+            permission_mode="acceptEdits"
+        )
+        
+        # Build prompt
+        prompt_template = self._load_prompt("bac_analyze_results_incremental")
+        
+        # Format test results
+        test_results_json = json.dumps(test_results, indent=2)
+        
+        # Format previous findings for the prompt
+        previous_findings_json = json.dumps(
+            [
+                {
+                    "id": f.id,
+                    "title": f.title,
+                    "vulnerability_type": f.vulnerability_type,
+                    "severity": f.severity,
+                    "description": f.description,
+                    "affected_url": f.affected_url,
+                    "source": f.source,
+                    "verified_by_test_id": f.verified_by_test_id
+                }
+                for f in previous_findings
+            ],
+            indent=2
+        )
+        
+        prompt = prompt_template.replace("{test_results}", test_results_json)
+        prompt = prompt.replace("{analysis_id}", analysis.id)
+        prompt = prompt.replace("{previous_findings}", previous_findings_json)
+        prompt = prompt.replace("{user_context}", analysis.user_context or "(No additional context provided)")
+        
+        self.logger.log_query(prompt)
+        
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(prompt)
+            response_text = await self._collect_response(client)
+            self.logger.log_response(response_text)
+        
+        # Parse results
+        result = self._parse_claude_response(response_text)
+        analysis.ai_analysis = response_text
+        
+        # Create a map of previous findings by ID for quick lookup
+        findings_map = {f.id: f for f in previous_findings}
+        
+        # Process findings with actions
+        if "findings" in result and result["findings"]:
+            for finding_data in result["findings"]:
+                action = finding_data.get("action", "create")
+                
+                if action == "mark_fp":
+                    # Mark existing finding as false positive
+                    prev_id = finding_data.get("previous_finding_id")
+                    if prev_id and prev_id in findings_map:
+                        fp_finding = findings_map[prev_id]
+                        fp_finding.false_positive = True
+                        fp_finding.false_positive_reason = finding_data.get("fp_reason", "Marked as FP during incremental analysis")
+                        fp_finding.title = f"[FP] {fp_finding.title}"
+                        self.logger.log_message(f"Marked finding as FP: {fp_finding.title}")
+                
+                elif action == "update":
+                    # Update existing finding with new evidence
+                    prev_id = finding_data.get("previous_finding_id")
+                    if prev_id and prev_id in findings_map:
+                        existing = findings_map[prev_id]
+                        # Update fields if provided
+                        if "severity" in finding_data:
+                            existing.severity = finding_data["severity"]
+                        if "description" in finding_data:
+                            existing.description = finding_data["description"]
+                        if "poc_request_raw" in finding_data:
+                            existing.poc_request_raw = finding_data["poc_request_raw"]
+                        if "poc_response_raw" in finding_data:
+                            existing.poc_response_raw = finding_data["poc_response_raw"]
+                        if "verified_by_test_id" in finding_data:
+                            existing.verified_by_test_id = finding_data["verified_by_test_id"]
+                            existing.source = "verified"
+                        self.logger.log_message(f"Updated finding: {existing.title}")
+                
+                elif action == "create":
+                    # Create new finding
+                    finding = self._create_finding_from_result(finding_data)
+                    
+                    # Mark as verified if linked to test
+                    if finding_data.get("verified_by_test_id"):
+                        finding.source = "verified"
+                        finding.verified_by_test_id = finding_data["verified_by_test_id"]
+                    else:
+                        finding.source = "inferred"
+                    
+                    analysis.findings.append(finding)
+                    self.logger.log_message(f"Created new finding: {finding.title}")
+        
+        # Ensure we keep all previous findings (with updates applied)
+        analysis.findings = list(findings_map.values()) + [
+            f for f in analysis.findings if f.id not in findings_map
+        ]
+        
+        # Update cached findings count
+        analysis.findings_count = len(analysis.findings)
+        self.logger.log_message(f"Incremental analysis complete: {analysis.findings_count} total findings")
+        
+        return analysis
+    
+    def _build_context_continuation_prompt(self, analysis: Analysis) -> str:
+        """
+        Build prompt for continuing analysis with user-provided context.
+        
+        Args:
+            analysis: Analysis with user_context and existing findings
+            
+        Returns:
+            Prompt string
+        """
+        prompt_template = self._load_prompt("bac_context_continuation")
+        
+        # Format existing findings summary
+        findings_summary = ""
+        if analysis.findings:
+            findings_list = []
+            for f in analysis.findings:
+                findings_list.append(f"- {f.title} ({f.severity}): {f.description[:100]}...")
+            findings_summary = "\n".join(findings_list)
+        else:
+            findings_summary = "No findings yet."
+        
+        # Format existing BAC tests summary
+        bac_tests_summary = ""
+        if analysis.bac_tests:
+            tests_list = []
+            for t in analysis.bac_tests:
+                status = "VULNERABLE" if t.access_granted else "SECURE"
+                tests_list.append(f"- {t.test_type}: {status}")
+            bac_tests_summary = "\n".join(tests_list)
+        else:
+            bac_tests_summary = "No tests executed yet."
+        
+        # Format request info
+        request_info = f"""
+METHOD: {analysis.request.method}
+URL: {analysis.request.url}
+HEADERS:
+{json.dumps(analysis.request.headers, indent=2)}
+BODY: {analysis.request.body or '(empty)'}
+"""
+        
+        # Use replace to avoid format string issues with JSON
+        prompt = prompt_template.replace("{request}", request_info)
+        prompt = prompt.replace("{existing_findings}", findings_summary)
+        prompt = prompt.replace("{existing_tests}", bac_tests_summary)
+        prompt = prompt.replace("{user_context}", analysis.user_context or "")
+        prompt = prompt.replace("{ai_analysis}", analysis.ai_analysis or "No previous analysis available.")
+        
+        return prompt
+    
+    def _setup_http_tool(self, session_dir: Path):
+        """
+        Create HTTP client tool file for Claude to use.
+        Uses configurable proxy settings from config.yaml.
+        
+        Args:
+            session_dir: Session working directory
+        """
+        # Get proxy settings from config
+        from api.utils.config import get_config
+        config = get_config()
+        proxy_url = config.proxy_url
+        proxy_timeout = config.proxy_timeout
+        proxy_enabled = config.proxy_enabled
+        
+        tool_file = session_dir / "http_tool.py"
+        tool_code = f'''"""HTTP client tool for sending requests via Burp proxy."""
+
+import httpx
+import asyncio
+from urllib.parse import urlparse
+
+# Configuration from pAIntester config.yaml
+PROXY_ENABLED = {proxy_enabled}
+PROXY_URL = "{proxy_url}"
+PROXY_TIMEOUT = {proxy_timeout}
+
+# Request counter for logging
+_request_count = 0
+
+def _log_request(method: str, url: str, test_description: str = None):
+    """Log a request being sent by the AI."""
+    global _request_count
+    _request_count += 1
+    
+    parsed = urlparse(url)
+    path = parsed.path or "/"
+    host = parsed.netloc
+    
+    desc = f" | {{test_description}}" if test_description else ""
+    proxy_note = "via proxy" if PROXY_ENABLED else "direct"
+    
+    print(f"[AI-REQUEST #{{_request_count}}] {{method}} {{host}}{{path}}{{desc}} ({{proxy_note}})")
+
+def _log_response(status_code: int, time_ms: float):
+    """Log a response received."""
+    print(f"[HTTP] {{status_code}} | {{time_ms:.0f}}ms")
+
+async def send_http_request(method: str, url: str, headers: dict = None, body: str = None, test_description: str = None) -> dict:
+    """
+    Send HTTP request through Burp proxy.
+    
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        url: Full URL
+        headers: Dict of headers
+        body: Request body
+        test_description: Optional description of what this test is checking
+    
+    Returns:
+        Dict with status_code, headers, body, time_ms
+    """
+    # Log the request
+    _log_request(method, url, test_description)
+    
+    try:
+        # Configure proxy if enabled
+        proxies = None
+        if PROXY_ENABLED:
+            proxies = {{"all://": PROXY_URL}}
+        
+        async with httpx.AsyncClient(proxies=proxies, verify=False, timeout=PROXY_TIMEOUT) as client:
+            import time
+            start = time.time()
+            
+            response = await client.request(
+                method=method.upper(),
+                url=url,
+                headers=headers or {{}},
+                content=body.encode() if body else None
+            )
+            
+            elapsed = (time.time() - start) * 1000
+            
+            # Log the response
+            _log_response(response.status_code, elapsed)
+            
+            return {{
+                "status_code": response.status_code,
+                "headers": dict(response.headers),
+                "body": response.text,
+                "time_ms": elapsed,
+                "success": True
+            }}
+    except Exception as e:
+        print(f"[ERROR] Request failed: {{str(e)}}")
+        return {{
+            "status_code": 0,
+            "headers": {{}},
+            "body": f"ERROR: {{str(e)}}",
+            "time_ms": 0,
+            "success": False,
+            "error": str(e)
+        }}
+
+# Sync wrapper for easier use
+def send_request_sync(method: str, url: str, headers: dict = None, body: str = None, test_description: str = None) -> dict:
+    """
+    Send HTTP request synchronously through Burp proxy.
+    
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        url: Full URL
+        headers: Dict of headers
+        body: Request body
+        test_description: Optional description for logging (e.g., "BAC test: user A accessing user B resource")
+    
+    Returns:
+        Dict with status_code, headers, body, time_ms, success
+    """
+    return asyncio.run(send_http_request(method, url, headers, body, test_description))
+'''
+        
+        tool_file.write_text(tool_code)
+    
+    def _build_initial_prompt(self, analysis: Analysis) -> str:
+        """
+        Build initial analysis prompt for Claude.
+        Uses request_response_pairs if available, falls back to legacy fields.
+        
+        Args:
+            analysis: Analysis object
+            
+        Returns:
+            Prompt string
+        """
+        prompt_template = self._load_prompt("bac_initial_analysis")
+        
+        # Check if we have the new request_response_pairs
+        if analysis.request_response_pairs:
+            # Use new multi-request format
+            request_info, response_info = self._format_request_response_pairs(analysis)
+            has_response = any(pair.response for pair in analysis.request_response_pairs)
+        else:
+            # Fallback to legacy single request/response
+            request_info = self._format_single_request(analysis.request)
+            response_info = self._format_single_response(analysis.response) if analysis.response else ""
+            has_response = analysis.response is not None
+        
+        # Add subdomain context if available
+        subdomain_context = ""
+        if analysis.subdomain:
+            subdomain_context = f"\nTARGET SUBDOMAIN: {analysis.subdomain}\n"
+        
+        prompt = prompt_template.replace("{request}", subdomain_context + request_info)
+        prompt = prompt.replace("{response}", response_info)
+        prompt = prompt.replace("{has_response}", "Yes" if has_response else "No")
+        
+        # Append user context if provided (for clear_and_rerun mode)
+        if analysis.user_context:
+            prompt += f"""
+
+ADDITIONAL CONTEXT FROM OPERATOR:
+{analysis.user_context}
+
+Consider this additional context when performing your analysis. It may contain important information about:
+- User roles and permissions
+- Application-specific behavior
+- Known security concerns
+- Testing priorities
+"""
+        
+        return prompt
+    
+    def _format_request_response_pairs(self, analysis: Analysis) -> tuple:
+        """
+        Format all request/response pairs for the prompt.
+        
+        Args:
+            analysis: Analysis with request_response_pairs
+            
+        Returns:
+            Tuple of (request_info, response_info) strings
+        """
+        request_parts = []
+        response_parts = []
+        
+        for i, pair in enumerate(analysis.request_response_pairs, 1):
+            req = pair.request
+            # Format request
+            req_info = f"""
+--- REQUEST {i} ---
+METHOD: {req.method}
+URL: {req.url}
+HEADERS:
+{json.dumps(req.headers, indent=2)}
+BODY: {req.body or '(empty)'}
+"""
+            request_parts.append(req_info)
+            
+            # Format response if available
+            if pair.response:
+                resp = pair.response
+                resp_info = f"""
+--- RESPONSE {i} ---
+STATUS: {resp.status_code}
+HEADERS:
+{json.dumps(resp.headers, indent=2)}
+BODY: {resp.body}
+"""
+                response_parts.append(resp_info)
+        
+        request_info = "\n".join(request_parts)
+        response_info = "\n".join(response_parts) if response_parts else "(No responses available)"
+        
+        # Add summary
+        total_pairs = len(analysis.request_response_pairs)
+        pairs_with_response = sum(1 for p in analysis.request_response_pairs if p.response)
+        summary = f"\nTOTAL: {total_pairs} request(s), {pairs_with_response} with response(s)\n"
+        
+        return summary + request_info, response_info
+    
+    def _format_single_request(self, request) -> str:
+        """Format a single request for the prompt (legacy support)."""
+        return f"""
+METHOD: {request.method}
+URL: {request.url}
+HEADERS:
+{json.dumps(request.headers, indent=2)}
+BODY: {request.body or '(empty)'}
+"""
+    
+    def _format_single_response(self, response) -> str:
+        """Format a single response for the prompt (legacy support)."""
+        body = response.body
+        # Truncate if too long (for legacy non-minified responses)
+        if len(body) > 1000:
+            body = body[:1000] + "... (truncated)"
+        return f"""
+STATUS: {response.status_code}
+HEADERS:
+{json.dumps(response.headers, indent=2)}
+BODY: {body}
+"""
+    
+    def _build_continuation_prompt(self, analysis: Analysis) -> str:
+        """
+        Build continuation prompt with additional context.
+        Uses request_response_pairs if available.
+        
+        Args:
+            analysis: Analysis with related_requests or request_response_pairs
+            
+        Returns:
+            Prompt string
+        """
+        # Use new format if available
+        if analysis.request_response_pairs:
+            request_info, response_info = self._format_request_response_pairs(analysis)
+            additional_context = f"""
+ALL REQUEST/RESPONSE PAIRS FOR SUBDOMAIN: {analysis.subdomain}
+
+REQUESTS:
+{request_info}
+
+RESPONSES:
+{response_info}
+"""
+        else:
+            # Legacy format
+            additional_context = "\n\n".join([
+            f"REQUEST {i+1}:\nMETHOD: {req.method}\nURL: {req.url}\nHEADERS: {json.dumps(req.headers, indent=2)}\nBODY: {req.body or '(empty)'}"
+            for i, req in enumerate(analysis.related_requests)
+        ])
+        
+        return f"""
+ADDITIONAL CONTEXT PROVIDED:
+
+{additional_context}
+
+You now have multiple requests from different users/contexts. Please proceed with BAC/IDOR testing:
+1. Compare the requests to identify user identifiers
+2. Generate test requests for:
+   - Missing authorization
+   - Horizontal privilege escalation (User A accessing User B's data)
+   - Vertical privilege escalation (User accessing admin resources)
+3. Use the http_tool.py to send test requests via Burp proxy
+4. Analyze responses and report findings
+
+Respond with JSON containing your test results and findings.
+"""
+    
+    async def _collect_response(self, client) -> str:
+        """
+        Collect all response messages from Claude with detailed logging.
+        
+        Args:
+            client: ClaudeSDKClient instance
+            
+        Returns:
+            Combined response text
+        """
+        messages = []
+        message_count = 0
+        
+        try:
+            async for message in client.receive_response():
+                message_count += 1
+                
+                # Log message structure for debugging
+                if self.logger:
+                    self.logger.log_message(f"Message {message_count}: type={type(message).__name__}", "debug")
+                
+                if hasattr(message, 'content'):
+                    for block in message.content:
+                        if hasattr(block, 'text') and block.text:
+                            messages.append(block.text)
+                            if self.logger:
+                                self.logger.log_message(f"  - Text block: {len(block.text)} chars", "debug")
+                        
+                        # Log any tool use
+                        if hasattr(block, 'type') and block.type == 'tool_use':
+                            if self.logger:
+                                self.logger.log_message(f"  - Tool use: {getattr(block, 'name', 'unknown')}", "debug")
+                
+                elif hasattr(message, 'text') and message.text:
+                    messages.append(message.text)
+                    if self.logger:
+                        self.logger.log_message(f"  - Text: {len(message.text)} chars", "debug")
+            
+            if self.logger:
+                self.logger.log_message(f"Collected {len(messages)} text blocks from {message_count} messages")
+            
+        except Exception as e:
+            if self.logger:
+                self.logger.log_error(e, "Error collecting response")
+            raise
+        
+        return "\n".join(messages)
+    
+    def _parse_claude_response(self, response_text: str) -> Dict[str, Any]:
+        """
+        Parse Claude's response to extract structured data.
+        Handles multiple JSON blocks by finding the one with expected fields.
+        
+        Args:
+            response_text: Raw response text
+            
+        Returns:
+            Parsed response dict
+        """
+        import re
+        
+        # Find all JSON code blocks
+        json_blocks = []
+        
+        # Match ```json ... ``` blocks
+        json_pattern = re.compile(r'```json\s*([\s\S]*?)```', re.MULTILINE)
+        for match in json_pattern.finditer(response_text):
+            try:
+                parsed = json.loads(match.group(1).strip())
+                json_blocks.append(parsed)
+            except json.JSONDecodeError:
+                continue
+        
+        # Also try ``` ... ``` blocks (without json tag)
+        if not json_blocks:
+            code_pattern = re.compile(r'```\s*([\s\S]*?)```', re.MULTILINE)
+            for match in code_pattern.finditer(response_text):
+                content = match.group(1).strip()
+                if content.startswith('{'):
+                    try:
+                        parsed = json.loads(content)
+                        json_blocks.append(parsed)
+                    except json.JSONDecodeError:
+                        continue
+        
+        # Find the block with expected fields
+        expected_fields = ['test_cases', 'findings', 'analysis_id']
+        for block in json_blocks:
+            if isinstance(block, dict):
+                if any(field in block for field in expected_fields):
+                    return block
+        
+        # Fallback: return the largest JSON block (most likely to be the data)
+        if json_blocks:
+            return max(json_blocks, key=lambda x: len(str(x)))
+        
+        # Last resort: try to extract JSON from raw text
+        try:
+            if "{" in response_text:
+                start = response_text.index("{")
+                end = response_text.rindex("}") + 1
+                return json.loads(response_text[start:end])
+        except (json.JSONDecodeError, ValueError):
+            pass
+        
+        return {"status": "unknown", "raw_response": response_text}
+    
+    def _handle_data_request(self, analysis: Analysis, result: Dict[str, Any]) -> Analysis:
+        """
+        Handle Claude's request for additional data.
+        
+        Args:
+            analysis: Current analysis
+            result: Parsed response with data request
+            
+        Returns:
+            Updated analysis in WAITING_FOR_DATA state
+        """
+        data_request = DataRequest(
+            request_type=result.get("request_type", "additional_data"),
+            reason=result.get("reason", "Additional context needed"),
+            instructions=result.get("instructions", "Please provide more data")
+        )
+        
+        analysis.data_requests.append(data_request)
+        analysis.status = AnalysisStatus.WAITING_FOR_DATA
+        analysis.ai_analysis = result.get("raw_response", "Waiting for additional data")
+        
+        return analysis
+    
+    async def _execute_testing_phase(
+        self,
+        client,
+        analysis: Analysis,
+        initial_result: Dict[str, Any]
+    ) -> Analysis:
+        """
+        Execute BAC/IDOR testing phase.
+        
+        Args:
+            client: ClaudeSDKClient instance
+            analysis: Current analysis
+            initial_result: Initial analysis results
+            
+        Returns:
+            Updated analysis with findings
+        """
+        if self.logger:
+            self.logger.log_message("Starting testing phase")
+        
+        # Build testing prompt
+        test_prompt_template = self._load_prompt("bac_testing_phase")
+        
+        # Manually replace placeholders to avoid format string issues with JSON
+        auth_profile_json = json.dumps(initial_result.get("auth_profile", {}), indent=2)
+        test_plan_json = json.dumps(initial_result.get("test_plan", []), indent=2)
+        
+        test_prompt = test_prompt_template.replace("{auth_profile}", auth_profile_json)
+        test_prompt = test_prompt.replace("{test_plan}", test_plan_json)
+        
+        if self.logger:
+            self.logger.log_query(test_prompt)
+            self.logger.log_message("Sending testing phase query")
+        
+        await client.query(test_prompt)
+        
+        # Collect test results
+        if self.logger:
+            self.logger.log_message("Collecting test results")
+        response_text = await self._collect_response(client)
+        if self.logger:
+            self.logger.log_response(response_text)
+        
+        test_results = self._parse_claude_response(response_text)
+        
+        # Extract findings
+        if "findings" in test_results and test_results["findings"]:
+            if self.logger:
+                self.logger.log_message(f"Extracting {len(test_results['findings'])} findings")
+            for finding_data in test_results["findings"]:
+                finding = self._create_finding_from_result(finding_data)
+                analysis.findings.append(finding)
+        else:
+            # Fallback: Try to extract findings from text if JSON extraction failed
+            if self.logger:
+                self.logger.log_message("No findings in JSON format, attempting text extraction")
+            
+            # Check if response contains vulnerability indicators
+            text_indicators = [
+                "CRITICAL FINDINGS",
+                "VULNERABILITIES IDENTIFIED",
+                "VULNERABILITY IDENTIFIED",
+                "Missing Authorization",
+                "IDOR",
+                "Privilege Escalation"
+            ]
+            
+            if any(indicator in response_text for indicator in text_indicators):
+                extracted_findings = self._extract_findings_from_text(response_text)
+                if extracted_findings:
+                    if self.logger:
+                        self.logger.log_message(f"Extracted {len(extracted_findings)} findings from text")
+                    analysis.findings.extend(extracted_findings)
+        
+        # Extract BAC tests
+        if "bac_tests" in test_results:
+            if self.logger:
+                self.logger.log_message(f"Extracting {len(test_results['bac_tests'])} BAC tests")
+            for test_data in test_results["bac_tests"]:
+                try:
+                    bac_test = BACTest(**test_data)
+                    analysis.bac_tests.append(bac_test)
+                except Exception as e:
+                    # Log but don't fail - Claude might use different format
+                    if self.logger:
+                        self.logger.log_message(f"Skipping BAC test due to format issue: {e}", "warning")
+                    # Still try to preserve the data in AI analysis
+                    continue
+        
+        # Validate findings against MCP tool logs
+        mcp_log_path = self.work_dir / analysis.id / "logs" / "mcp_tools.log"
+        validated_findings = self._validate_findings(analysis.findings, mcp_log_path, test_results)
+        analysis.findings = validated_findings
+        
+        analysis.status = AnalysisStatus.COMPLETED
+        analysis.completed_at = datetime.utcnow()
+        analysis.ai_analysis = response_text
+        
+        if self.logger:
+            self.logger.log_message(f"Testing phase complete: {len(analysis.findings)} validated findings, {len(analysis.bac_tests)} tests")
+        
+        return analysis
+    
+    def _validate_findings(self, findings: list, mcp_log_path: Path, test_results: dict) -> list:
+        """
+        Validate findings against actual MCP tool responses.
+        
+        Prevents hallucination by ensuring:
+        1. MCP tool calls were actually made
+        2. Responses don't contain rejection patterns
+        3. Tool failures didn't occur
+        
+        Args:
+            findings: List of Finding objects from Claude
+            mcp_log_path: Path to MCP tool call log file
+            test_results: Parsed test results from Claude
+            
+        Returns:
+            List of validated Finding objects
+        """
+        # Check for tool_failure status in response
+        if test_results.get("status") == "tool_failure":
+            if self.logger:
+                self.logger.log_error(
+                    Exception(test_results.get("error", "MCP tool failure")),
+                    "Analysis aborted due to MCP tool failure"
+                )
+            return []  # Reject all findings when tools failed
+        
+        # Check if MCP log exists
+        if not mcp_log_path.exists():
+            if self.logger:
+                self.logger.log_message("WARNING: No MCP tool log found - findings may be hallucinated", "warning")
+            # Allow findings but log the warning
+            return findings
+        
+        # Load MCP tool log
+        tool_calls = []
+        try:
+            with open(mcp_log_path) as f:
+                for line in f:
+                    if line.strip():
+                        tool_calls.append(json.loads(line))
+        except Exception as e:
+            if self.logger:
+                self.logger.log_error(e, "Failed to read MCP tool log")
+            return findings  # Allow findings but log the error
+        
+        if len(tool_calls) == 0:
+            if self.logger:
+                self.logger.log_message("WARNING: MCP log is empty - no tool calls were made", "warning")
+            # Could be hallucination, but don't block if there are findings
+            return findings
+        
+        # Check for failed tool calls
+        failed_calls = [tc for tc in tool_calls if not tc.get("success", True)]
+        if failed_calls and self.logger:
+            self.logger.log_message(f"WARNING: {len(failed_calls)} MCP tool calls failed", "warning")
+        
+        # Check for rejection patterns in tool calls
+        secure_calls = [tc for tc in tool_calls if tc.get("result_summary", {}).get("is_rejection", False)]
+        if self.logger:
+            self.logger.log_message(
+                f"MCP validation: {len(tool_calls)} calls, {len(secure_calls)} showed rejection patterns"
+            )
+        
+        # Validate each finding - check if there are any non-rejection tool calls
+        validated = []
+        non_rejection_calls = [tc for tc in tool_calls 
+                               if tc.get("success") and 
+                               not tc.get("result_summary", {}).get("is_rejection", False)]
+        
+        if len(non_rejection_calls) == 0 and len(findings) > 0:
+            # All tool calls showed rejection but Claude still reported findings
+            if self.logger:
+                self.logger.log_message(
+                    f"REJECTING {len(findings)} findings: all {len(tool_calls)} tool calls showed rejection patterns",
+                    "warning"
+                )
+            return []  # Reject all findings
+        
+        # Keep findings but log validation results
+        for finding in findings:
+            if self.logger:
+                self.logger.log_message(f"Validated finding: {finding.title}", "debug")
+            validated.append(finding)
+        
+        return validated
+    
+    def _extract_findings_from_text(self, text: str) -> list:
+        """
+        Extract findings from markdown/text format as fallback.
+        Used when Claude returns findings in text format instead of JSON.
+        
+        Args:
+            text: Claude's text response
+            
+        Returns:
+            List of Finding objects
+        """
+        import re
+        findings = []
+        
+        if self.logger:
+            self.logger.log_message("Attempting to extract findings from text format")
+        
+        # Pattern to match findings like "### **1. Missing Authorization Check (HIGH)**"
+        # or "**1. Missing Authorization Check**" or "1. Missing Authorization (HIGH)"
+        pattern = r'\*\*\d+\.\s+(.+?)\s*\(?(HIGH|CRITICAL|MEDIUM|LOW)?\)?\*\*'
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        
+        for title, severity in matches:
+            title = title.strip()
+            severity_value = severity.lower() if severity else "medium"
+            
+            # Determine vulnerability type from title
+            vuln_type = "unknown"
+            title_lower = title.lower()
+            if "idor" in title_lower or "direct object" in title_lower:
+                vuln_type = "idor"
+            elif "auth" in title_lower or "authorization" in title_lower:
+                vuln_type = "auth_bypass"
+            elif "privilege" in title_lower or "escalation" in title_lower:
+                vuln_type = "privilege_escalation"
+            elif "path" in title_lower or "traversal" in title_lower:
+                vuln_type = "path_traversal"
+            
+            finding = Finding(
+                vulnerability_type=vuln_type,
+                severity=severity_value,
+                title=title,
+                description=f"Extracted from AI analysis. See AI analysis field for full details.",
+                injection_point="See AI analysis for details",
+                remediation="See AI analysis for remediation recommendations"
+            )
+            findings.append(finding)
+            
+            if self.logger:
+                self.logger.log_message(f"Extracted finding: {title} ({severity_value})")
+        
+        return findings
+    
+    def _create_finding_from_result(self, finding_data: Dict[str, Any]) -> Finding:
+        """
+        Create Finding object from Claude's result.
+        
+        Args:
+            finding_data: Finding data dict
+            
+        Returns:
+            Finding object
+        """
+        # Map vuln type
+        vuln_type_map = {
+            "horizontal_privilege_escalation": VulnerabilityType.AUTH_BYPASS,
+            "vertical_privilege_escalation": VulnerabilityType.AUTH_BYPASS,
+            "missing_authorization": VulnerabilityType.AUTH_BYPASS,
+            "idor": VulnerabilityType.AUTH_BYPASS,
+            "auth_bypass": VulnerabilityType.AUTH_BYPASS,
+            "privilege_escalation": VulnerabilityType.AUTH_BYPASS,
+            "path_traversal": VulnerabilityType.PATH_TRAVERSAL,
+        }
+        
+        vuln_type = vuln_type_map.get(
+            finding_data.get("vulnerability_type", "").lower(),
+            VulnerabilityType.UNKNOWN
+        )
+        
+        # Extract poc_steps as list
+        poc_steps = finding_data.get("poc_steps", [])
+        if isinstance(poc_steps, str):
+            poc_steps = [poc_steps]
+        
+        return Finding(
+            vulnerability_type=vuln_type,
+            severity=finding_data.get("severity", "medium"),
+            title=finding_data.get("title", "Access Control Violation"),
+            description=finding_data.get("description", ""),
+            affected_url=finding_data.get("affected_url"),
+            injection_point=finding_data.get("injection_point", ""),
+            impact=finding_data.get("impact"),
+            recommendation=finding_data.get("recommendation"),
+            poc_steps=poc_steps,
+            confirmed=False,
+            test_results=[],
+            remediation=finding_data.get("remediation")  # Legacy support
+        )
+    
+    def _load_prompt(self, prompt_name: str) -> str:
+        """
+        Load prompt template from file.
+        Checks category-specific directory (bac/) first, then shared/ directory.
+        
+        Args:
+            prompt_name: Name of prompt file (without extension)
+            
+        Returns:
+            Prompt template string
+        """
+        # Check category-specific prompt first (e.g., prompts/bac/bac_initial_analysis.txt)
+        category_prompt = self.prompts_dir / "bac" / f"{prompt_name}.txt"
+        if category_prompt.exists():
+            return category_prompt.read_text()
+        
+        # Check shared prompts (e.g., prompts/shared/vulnerability_detection.txt)
+        shared_prompt = self.prompts_dir / "shared" / f"{prompt_name}.txt"
+        if shared_prompt.exists():
+            return shared_prompt.read_text()
+        
+        # Return default prompt if file not found
+        return "Analyze this request for BAC/IDOR vulnerabilities: {request}"
+    
+    def _save_analysis_state(self, analysis: Analysis, session_dir: Path):
+        """
+        Save complete analysis state for debugging.
+        
+        Args:
+            analysis: Analysis object
+            session_dir: Session directory
+        """
+        state_file = session_dir / "analysis_state.json"
+        
+        try:
+            # Helper to convert datetime objects to ISO format strings
+            def serialize_model(model):
+                """Serialize a Pydantic model with datetime handling."""
+                if model is None:
+                    return None
+                data = model.dict()
+                # Convert any datetime fields to ISO strings
+                for key, value in data.items():
+                    if hasattr(value, 'isoformat'):
+                        data[key] = value.isoformat()
+                return data
+            
+            # Convert to dict
+            state = {
+                "id": analysis.id,
+                "status": analysis.status.value,
+                "target_url": analysis.target_url,
+                "created_at": analysis.created_at.isoformat(),
+                "updated_at": analysis.updated_at.isoformat(),
+                "error": analysis.error,
+                "ai_analysis": analysis.ai_analysis,
+                "auth_profile": serialize_model(analysis.auth_profile),
+                "findings_count": len(analysis.findings),
+                "bac_tests_count": len(analysis.bac_tests),
+                "data_requests": [serialize_model(dr) for dr in analysis.data_requests],
+                "related_requests_count": len(analysis.related_requests),
+            }
+            
+            with open(state_file, 'w') as f:
+                json.dump(state, f, indent=2)
+            
+            if self.logger:
+                self.logger.log_message(f"Analysis state saved to {state_file}", "debug")
+        
+        except Exception as e:
+            if self.logger:
+                self.logger.log_error(e, "Failed to save analysis state")
+    
+    async def analyze_with_deterministic_testing(self, analysis: Analysis) -> Analysis:
+        """
+        Three-phase deterministic analysis.
+        
+        Phase 1: Claude generates test cases (no HTTP execution)
+        Phase 2: Python executes tests deterministically via httpx
+        Phase 3: Claude analyzes actual test results
+        
+        This approach prevents hallucination by ensuring:
+        - All HTTP requests are actually executed
+        - Responses are real, not inferred
+        - Findings are marked as "verified" or "inferred"
+        
+        Args:
+            analysis: Analysis object with initial request/response pairs
+            
+        Returns:
+            Updated analysis with verified findings
+        """
+        # Create logger for this analysis
+        self.logger = AnalysisLogger(analysis.id, self.work_dir)
+        self.logger.log_message("Starting deterministic three-phase analysis")
+        
+        session_dir = self.work_dir / analysis.id
+        session_dir.mkdir(exist_ok=True)
+        
+        try:
+            # === PHASE 1: Generate Test Plan ===
+            self.logger.log_message("=== PHASE 1: Generating test plan ===")
+            test_plan = await self._generate_test_plan(analysis, session_dir)
+            
+            if not test_plan or not test_plan.get("test_cases"):
+                self.logger.log_message("No test cases generated, completing with inferred findings only")
+                analysis.status = AnalysisStatus.COMPLETED
+                analysis.completed_at = datetime.utcnow()
+                self._save_analysis_state(analysis, session_dir)
+                return analysis
+            
+            self.logger.log_message(f"Generated {len(test_plan.get('test_cases', []))} test cases")
+            
+            # Save test plan
+            test_plan_path = session_dir / "test_cases.json"
+            with open(test_plan_path, 'w') as f:
+                json.dump(test_plan, f, indent=2)
+            
+            # === PHASE 2: Execute Tests Deterministically ===
+            self.logger.log_message("=== PHASE 2: Executing tests (no AI involvement) ===")
+            
+            from engine.core.test_executor import TestExecutor
+            executor = TestExecutor(analysis.id, self.work_dir)
+            test_results = executor.execute_all_tests()
+            
+            if not test_results or not test_results.get("test_results"):
+                self.logger.log_message("No test results generated")
+                analysis.status = AnalysisStatus.COMPLETED
+                analysis.completed_at = datetime.utcnow()
+                self._save_analysis_state(analysis, session_dir)
+                return analysis
+            
+            self.logger.log_message(f"Executed {len(test_results.get('test_results', []))} tests")
+            
+            # === PHASE 3: Analyze Results ===
+            self.logger.log_message("=== PHASE 3: Analyzing test results ===")
+            analysis = await self._analyze_test_results(analysis, test_results, session_dir)
+            
+            # Attach raw request/response to verified findings
+            for finding in analysis.findings:
+                if finding.source == "verified" and finding.verified_by_test_id:
+                    test_result = next(
+                        (t for t in test_results.get("test_results", [])
+                         if t.get("test_id") == finding.verified_by_test_id),
+                        None
+                    )
+                    if test_result:
+                        finding.poc_request_raw = test_result.get("request_raw")
+                        finding.poc_response_raw = test_result.get("response_raw")
+                        self.logger.log_message(
+                            f"Attached Burp-friendly PoC to finding: {finding.title[:50]}",
+                            "debug"
+                        )
+            
+            analysis.status = AnalysisStatus.COMPLETED
+            analysis.completed_at = datetime.utcnow()
+            self._save_analysis_state(analysis, session_dir)
+            
+            self.logger.log_message(
+                f"Deterministic analysis complete: {len(analysis.findings)} findings "
+                f"({sum(1 for f in analysis.findings if f.source == 'verified')} verified, "
+                f"{sum(1 for f in analysis.findings if f.source == 'inferred')} inferred)"
+            )
+            
+            return analysis
+        
+        except Exception as e:
+            self.logger.log_error(e, "Deterministic analysis failed")
+            analysis.status = AnalysisStatus.FAILED
+            analysis.error = f"Deterministic analysis failed: {str(e)}"
+            self._save_analysis_state(analysis, session_dir)
+            return analysis
+    
+    async def _generate_test_plan(self, analysis: Analysis, session_dir: Path) -> Dict[str, Any]:
+        """
+        Phase 1: Generate test cases without executing HTTP requests.
+        
+        Args:
+            analysis: Analysis object with captured traffic
+            session_dir: Session directory
+            
+        Returns:
+            Test plan dict with test_cases array
+        """
+        if not ClaudeSDKClient:
+            raise Exception("ClaudeSDKClient not available")
+        
+        # Add Claude CLI to PATH if needed
+        claude_cli_dir = os.path.expanduser(
+            os.getenv("CLAUDE_CLI_DIR", "~/.claude/local")
+        )
+        if claude_cli_dir and os.path.exists(claude_cli_dir):
+            os.environ["PATH"] = f"{claude_cli_dir}:{os.environ.get('PATH', '')}"
+        
+        # Configure Claude options - NO MCP tools for test generation
+        # Removed Write/Edit to prevent Claude from writing to files instead of returning inline
+        options = ClaudeCodeOptions(
+            cwd=str(session_dir),
+            allowed_tools=["Bash", "Glob", "Grep", "LS", "Read"],
+            permission_mode="acceptEdits"
+        )
+        
+        # Build prompt
+        prompt_template = self._load_prompt("bac_generate_tests")
+        
+        # Format captured traffic
+        if analysis.request_response_pairs:
+            request_info, response_info = self._format_request_response_pairs(analysis)
+        else:
+            request_info = self._format_single_request(analysis.request)
+            response_info = self._format_single_response(analysis.response) if analysis.response else ""
+        
+        prompt = prompt_template.replace("{captured_traffic}", request_info + "\n" + response_info)
+        prompt = prompt.replace("{subdomain}", analysis.subdomain or "unknown")
+        prompt = prompt.replace("{analysis_id}", analysis.id)
+        prompt = prompt.replace("{user_context}", analysis.user_context or "(No additional context provided)")
+        
+        self.logger.log_query(prompt)
+        
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(prompt)
+            response_text = await self._collect_response(client)
+            self.logger.log_response(response_text)
+        
+        # Parse test plan
+        test_plan = self._parse_claude_response(response_text)
+        
+        # Fallback: check if Claude wrote to a file instead
+        if not test_plan.get("test_cases"):
+            test_plan_file = session_dir / "test_plan.json"
+            if test_plan_file.exists():
+                self.logger.log_message("Found test_plan.json file, loading from disk", "debug")
+                try:
+                    with open(test_plan_file) as f:
+                        test_plan = json.load(f)
+                except (json.JSONDecodeError, IOError) as e:
+                    self.logger.log_message(f"Failed to load test_plan.json: {e}", "warning")
+        
+        return test_plan
+    
+    async def _analyze_test_results(
+        self,
+        analysis: Analysis,
+        test_results: Dict[str, Any],
+        session_dir: Path
+    ) -> Analysis:
+        """
+        Phase 3: Analyze actual test results and generate verified findings.
+        
+        Args:
+            analysis: Analysis object
+            test_results: Results from TestExecutor
+            session_dir: Session directory
+            
+        Returns:
+            Updated analysis with verified findings
+        """
+        if not ClaudeSDKClient:
+            raise Exception("ClaudeSDKClient not available")
+        
+        # Add Claude CLI to PATH if needed
+        claude_cli_dir = os.path.expanduser(
+            os.getenv("CLAUDE_CLI_DIR", "~/.claude/local")
+        )
+        if claude_cli_dir and os.path.exists(claude_cli_dir):
+            os.environ["PATH"] = f"{claude_cli_dir}:{os.environ.get('PATH', '')}"
+        
+        # Configure Claude options - NO MCP tools for result analysis
+        options = ClaudeCodeOptions(
+            cwd=str(session_dir),
+            allowed_tools=["Bash", "Glob", "Grep", "LS", "Read", "Write", "Edit"],
+            permission_mode="acceptEdits"
+        )
+        
+        # Build prompt
+        prompt_template = self._load_prompt("bac_analyze_results")
+        
+        # Format test results
+        test_results_json = json.dumps(test_results, indent=2)
+        
+        prompt = prompt_template.replace("{test_results}", test_results_json)
+        prompt = prompt.replace("{analysis_id}", analysis.id)
+        
+        self.logger.log_query(prompt)
+        
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(prompt)
+            response_text = await self._collect_response(client)
+            self.logger.log_response(response_text)
+        
+        # Parse results
+        result = self._parse_claude_response(response_text)
+        analysis.ai_analysis = response_text
+        
+        # Claude writes findings to verified_findings.json via file operations
+        # We don't parse from response anymore - just update the cached count
+        verified_findings_file = session_dir / "verified_findings.json"
+        if verified_findings_file.exists():
+            try:
+                with open(verified_findings_file, 'r') as f:
+                    findings_data = json.load(f)
+                analysis.findings_count = len(findings_data.get("findings", []))
+                self.logger.log_message(f"Found {analysis.findings_count} findings in verified_findings.json")
+            except Exception as e:
+                self.logger.log_message(f"Warning: Could not count findings: {e}", "warning")
+                analysis.findings_count = 0
+        else:
+            analysis.findings_count = 0
+            self.logger.log_message("No verified_findings.json file found")
+        
+        return analysis
