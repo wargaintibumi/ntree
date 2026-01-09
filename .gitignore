@@ -9,3 +9,6 @@ venv/
 
 # Build artifacts
 deployment_build/
+
+# Local settings
+.claude/

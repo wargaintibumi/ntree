@@ -1,8 +1,0 @@
-[console_scripts]
-ntree-enum = ntree_mcp.enum:main
-ntree-post = ntree_mcp.post:main
-ntree-report = ntree_mcp.report:main
-ntree-scan = ntree_mcp.scan:main
-ntree-scope = ntree_mcp.scope:main
-ntree-vuln = ntree_mcp.vuln:main
-
