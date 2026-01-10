@@ -45,6 +45,39 @@ class PassiveReconArgs(BaseModel):
     domain: str = Field(description="Domain name for passive reconnaissance")
 
 
+class NucleiScanArgs(BaseModel):
+    """Arguments for nuclei_scan tool."""
+    targets: str = Field(description="Target URLs or IPs (comma-separated for multiple)")
+    severity: str = Field(
+        default="all",
+        description="Severity filter: critical, high, medium, low, info, or all"
+    )
+    templates: str = Field(
+        default="",
+        description="Specific template tags (e.g., 'cve,exposure,misconfiguration'). Empty for all templates."
+    )
+
+
+class NiktoScanArgs(BaseModel):
+    """Arguments for nikto_scan tool."""
+    target: str = Field(description="Target web server URL (e.g., http://example.com)")
+    port: int = Field(default=80, description="Target port (default: 80)")
+    ssl: bool = Field(default=False, description="Use SSL/HTTPS (default: False)")
+
+
+class MasscanArgs(BaseModel):
+    """Arguments for masscan tool."""
+    targets: str = Field(description="Target IPs or CIDR ranges")
+    ports: str = Field(
+        default="0-65535",
+        description="Port range (e.g., '1-1000' or '80,443,8080')"
+    )
+    rate: int = Field(
+        default=1000,
+        description="Packet transmission rate (packets per second, default: 1000)"
+    )
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available tools."""
@@ -58,6 +91,21 @@ async def list_tools() -> list[Tool]:
             name="passive_recon",
             description="Perform passive reconnaissance (DNS, OSINT) without directly scanning targets",
             inputSchema=PassiveReconArgs.model_json_schema()
+        ),
+        Tool(
+            name="nuclei_scan",
+            description="Run Nuclei vulnerability scanner with modern templates for CVEs, misconfigurations, and exposures",
+            inputSchema=NucleiScanArgs.model_json_schema()
+        ),
+        Tool(
+            name="nikto_scan",
+            description="Run Nikto web server vulnerability scanner to identify common web vulnerabilities",
+            inputSchema=NiktoScanArgs.model_json_schema()
+        ),
+        Tool(
+            name="masscan",
+            description="Fast port scanner using masscan - much faster than nmap for large port ranges",
+            inputSchema=MasscanArgs.model_json_schema()
         ),
     ]
 
@@ -79,6 +127,33 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         elif name == "passive_recon":
             args = PassiveReconArgs(**arguments)
             result = await passive_recon(args.domain)
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "nuclei_scan":
+            args = NucleiScanArgs(**arguments)
+            result = await nuclei_scan(
+                args.targets,
+                args.severity,
+                args.templates
+            )
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "nikto_scan":
+            args = NiktoScanArgs(**arguments)
+            result = await nikto_scan(
+                args.target,
+                args.port,
+                args.ssl
+            )
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "masscan":
+            args = MasscanArgs(**arguments)
+            result = await masscan(
+                args.targets,
+                args.ports,
+                args.rate
+            )
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         else:
@@ -337,6 +412,337 @@ async def _whois_lookup(domain: str) -> str:
         logger.warning(f"Error performing WHOIS lookup: {e}")
 
     return ""
+
+
+async def nuclei_scan(
+    targets: str,
+    severity: str = "all",
+    templates: str = ""
+) -> dict:
+    """
+    Perform vulnerability scan using Nuclei.
+
+    Args:
+        targets: Target URLs or IPs
+        severity: Severity filter
+        templates: Template tags to use
+
+    Returns:
+        {
+            "status": "success",
+            "scan_id": "nuclei_20250110_103045",
+            "findings": [...],
+            "total_findings": 5,
+            "summary": "..."
+        }
+    """
+    try:
+        logger.info(f"Starting Nuclei scan: targets={targets}, severity={severity}")
+
+        # Create temporary file for JSON output
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json_output = Path(f.name)
+
+        try:
+            # Build nuclei command
+            cmd_parts = ["nuclei"]
+
+            # Add targets
+            target_list = [t.strip() for t in targets.split(',')]
+            if len(target_list) == 1:
+                cmd_parts.extend(["-u", target_list[0]])
+            else:
+                # Create target file
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tf:
+                    target_file = Path(tf.name)
+                    tf.write('\n'.join(target_list))
+                cmd_parts.extend(["-l", str(target_file)])
+
+            # Add severity filter
+            if severity != "all":
+                cmd_parts.extend(["-severity", severity])
+
+            # Add template tags
+            if templates:
+                cmd_parts.extend(["-tags", templates])
+
+            # Output as JSON
+            cmd_parts.extend(["-json", "-o", str(json_output)])
+
+            # Silent mode (reduce noise)
+            cmd_parts.append("-silent")
+
+            command = " ".join(cmd_parts)
+            logger.debug(f"Executing: {command}")
+
+            # Run nuclei scan (timeout 15 minutes)
+            returncode, stdout, stderr = await run_command(command, timeout=900)
+
+            # Parse JSON output
+            findings = []
+            if json_output.exists() and json_output.stat().st_size > 0:
+                try:
+                    # Nuclei outputs one JSON object per line
+                    for line in json_output.read_text().strip().split('\n'):
+                        if line.strip():
+                            finding = json.loads(line)
+                            findings.append({
+                                "template_id": finding.get("template-id", "unknown"),
+                                "name": finding.get("info", {}).get("name", "Unknown"),
+                                "severity": finding.get("info", {}).get("severity", "info"),
+                                "matched_at": finding.get("matched-at", ""),
+                                "description": finding.get("info", {}).get("description", ""),
+                                "cvss_score": finding.get("info", {}).get("classification", {}).get("cvss-score", 0),
+                                "cve_id": finding.get("info", {}).get("classification", {}).get("cve-id", []),
+                            })
+                except Exception as e:
+                    logger.error(f"Error parsing Nuclei output: {e}")
+
+            # Generate scan ID
+            scan_id = f"nuclei_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+            # Create summary
+            severity_counts = {}
+            for finding in findings:
+                sev = finding.get("severity", "info")
+                severity_counts[sev] = severity_counts.get(sev, 0) + 1
+
+            summary = f"Nuclei scan complete: {len(findings)} findings - " + ", ".join(
+                f"{sev}: {count}" for sev, count in severity_counts.items()
+            )
+
+            logger.info(summary)
+
+            return {
+                "status": "success",
+                "scan_id": scan_id,
+                "findings": findings,
+                "total_findings": len(findings),
+                "severity_breakdown": severity_counts,
+                "summary": summary,
+                "command": command
+            }
+
+        finally:
+            # Clean up temp files
+            if json_output.exists():
+                json_output.unlink()
+            if 'target_file' in locals() and target_file.exists():
+                target_file.unlink()
+
+    except Exception as e:
+        logger.error(f"Error during Nuclei scan: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+async def nikto_scan(
+    target: str,
+    port: int = 80,
+    ssl: bool = False
+) -> dict:
+    """
+    Perform web vulnerability scan using Nikto.
+
+    Args:
+        target: Target web server URL
+        port: Target port
+        ssl: Use SSL/HTTPS
+
+    Returns:
+        {
+            "status": "success",
+            "scan_id": "nikto_20250110_103045",
+            "findings": [...],
+            "total_findings": 12,
+            "summary": "..."
+        }
+    """
+    try:
+        logger.info(f"Starting Nikto scan: target={target}, port={port}, ssl={ssl}")
+
+        # Create temporary file for output
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            output_file = Path(f.name)
+
+        try:
+            # Build nikto command
+            cmd_parts = ["nikto"]
+            cmd_parts.extend(["-h", target])
+            cmd_parts.extend(["-p", str(port)])
+
+            if ssl:
+                cmd_parts.append("-ssl")
+
+            # Output to file
+            cmd_parts.extend(["-o", str(output_file)])
+            cmd_parts.extend(["-Format", "txt"])
+
+            # No interactive prompts
+            cmd_parts.append("-ask no")
+
+            command = " ".join(cmd_parts)
+            logger.debug(f"Executing: {command}")
+
+            # Run nikto scan (timeout 20 minutes)
+            returncode, stdout, stderr = await run_command(command, timeout=1200)
+
+            # Parse output
+            findings = []
+            if output_file.exists():
+                output_content = output_file.read_text()
+
+                # Parse nikto output for findings
+                for line in output_content.split('\n'):
+                    line = line.strip()
+                    if line.startswith('+'):
+                        # This is a finding
+                        findings.append({
+                            "description": line[1:].strip(),
+                            "severity": "medium",  # Nikto doesn't provide severity
+                        })
+
+            # Generate scan ID
+            scan_id = f"nikto_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+            summary = f"Nikto scan complete: {len(findings)} potential issues found"
+
+            logger.info(summary)
+
+            return {
+                "status": "success",
+                "scan_id": scan_id,
+                "findings": findings,
+                "total_findings": len(findings),
+                "summary": summary,
+                "command": command,
+                "raw_output": output_content if output_file.exists() else ""
+            }
+
+        finally:
+            # Clean up temp file
+            if output_file.exists():
+                output_file.unlink()
+
+    except Exception as e:
+        logger.error(f"Error during Nikto scan: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+async def masscan(
+    targets: str,
+    ports: str = "0-65535",
+    rate: int = 1000
+) -> dict:
+    """
+    Perform fast port scan using masscan.
+
+    Args:
+        targets: Target IPs or CIDR ranges
+        ports: Port range
+        rate: Packet transmission rate
+
+    Returns:
+        {
+            "status": "success",
+            "scan_id": "masscan_20250110_103045",
+            "hosts": [...],
+            "total_ports": 250,
+            "summary": "..."
+        }
+    """
+    try:
+        logger.info(f"Starting masscan: targets={targets}, ports={ports}, rate={rate}")
+
+        # Create temporary file for output
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            output_file = Path(f.name)
+
+        try:
+            # Build masscan command
+            cmd_parts = ["sudo", "masscan"]
+            cmd_parts.extend(["-p", ports])
+            cmd_parts.extend(["--rate", str(rate)])
+            cmd_parts.extend(["-oL", str(output_file)])
+            cmd_parts.append(targets)
+
+            command = " ".join(cmd_parts)
+            logger.debug(f"Executing: {command}")
+
+            # Run masscan (timeout 30 minutes for large scans)
+            returncode, stdout, stderr = await run_command(command, timeout=1800)
+
+            if returncode != 0:
+                logger.error(f"Masscan failed: {stderr}")
+                return {
+                    "status": "error",
+                    "error": f"Masscan failed with returncode {returncode}",
+                    "stderr": stderr[:1000]
+                }
+
+            # Parse output
+            hosts = {}
+            if output_file.exists():
+                for line in output_file.read_text().split('\n'):
+                    if line.startswith('open'):
+                        # Format: open tcp 80 1.2.3.4 1234567890
+                        parts = line.split()
+                        if len(parts) >= 4:
+                            protocol = parts[1]
+                            port = parts[2]
+                            ip = parts[3]
+
+                            if ip not in hosts:
+                                hosts[ip] = []
+
+                            hosts[ip].append({
+                                "port": int(port),
+                                "protocol": protocol,
+                                "state": "open"
+                            })
+
+            # Generate scan ID
+            scan_id = f"masscan_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+            # Calculate total open ports
+            total_ports = sum(len(ports) for ports in hosts.values())
+
+            summary = f"Masscan complete: {len(hosts)} hosts, {total_ports} open ports found"
+
+            logger.info(summary)
+
+            return {
+                "status": "success",
+                "scan_id": scan_id,
+                "hosts": [
+                    {
+                        "ip": ip,
+                        "ports": ports
+                    }
+                    for ip, ports in hosts.items()
+                ],
+                "total_hosts": len(hosts),
+                "total_ports": total_ports,
+                "summary": summary,
+                "command": command
+            }
+
+        finally:
+            # Clean up temp file
+            if output_file.exists():
+                output_file.unlink()
+
+    except Exception as e:
+        logger.error(f"Error during masscan: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
+        }
 
 
 def main():

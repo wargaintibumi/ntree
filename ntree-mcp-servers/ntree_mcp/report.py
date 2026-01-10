@@ -381,7 +381,19 @@ async def generate_report(
 
         if output_format == "html":
             report_path = reports_dir / f"{format}_report.html"
-            html_content = _markdown_to_html(content)
+
+            # Convert markdown content to HTML
+            content_html = _markdown_to_html(content)
+
+            # Render using template
+            html_content = _render_html_template(
+                title=f"{format.capitalize()} Report",
+                engagement_id=engagement_id,
+                test_date=state.get('created', 'Unknown'),
+                duration=risk_assessment.get('metrics', {}).get('duration_hours', 0),
+                overall_risk=risk_assessment.get('overall_risk', 'unknown'),
+                content_html=content_html
+            )
             report_path.write_text(html_content)
         else:
             report_path = reports_dir / f"{format}_report.md"
@@ -663,9 +675,249 @@ def _format_references(references: list) -> str:
     return formatted
 
 
+def _render_html_template(
+    title: str,
+    engagement_id: str,
+    test_date: str,
+    duration: float,
+    overall_risk: str,
+    content_html: str
+) -> str:
+    """Render HTML report using template."""
+    try:
+        # Get template path
+        template_path = Path(__file__).parent / "templates" / "report_template.html"
+
+        if not template_path.exists():
+            logger.warning(f"Template not found at {template_path}, using fallback")
+            return _markdown_to_html_fallback(content_html)
+
+        # Load template
+        template = template_path.read_text()
+
+        # Replace template variables
+        html = template.replace("{{ title }}", title)
+        html = html.replace("{{ engagement_id }}", engagement_id)
+        html = html.replace("{{ test_date }}", test_date)
+        html = html.replace("{{ duration }}", str(duration))
+        html = html.replace("{{ overall_risk }}", overall_risk.lower())
+        html = html.replace("{{ content }}", content_html)
+        html = html.replace("{{ generation_date }}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+        return html
+
+    except Exception as e:
+        logger.error(f"Error rendering template: {e}", exc_info=True)
+        return _markdown_to_html_fallback(content_html)
+
+
 def _markdown_to_html(markdown_content: str) -> str:
-    """Convert markdown to basic HTML."""
-    # Simple markdown to HTML conversion
+    """Convert markdown content to HTML with proper formatting."""
+    # Convert markdown to HTML elements
+    html = markdown_content
+
+    # Convert headers
+    html = _convert_markdown_headers(html)
+
+    # Convert code blocks
+    html = _convert_markdown_code_blocks(html)
+
+    # Convert tables
+    html = _convert_markdown_tables(html)
+
+    # Convert lists
+    html = _convert_markdown_lists(html)
+
+    # Convert bold/italic
+    html = _convert_markdown_emphasis(html)
+
+    # Convert links
+    html = _convert_markdown_links(html)
+
+    # Add severity styling
+    html = _add_severity_styling(html)
+
+    # Wrap paragraphs
+    html = _wrap_paragraphs(html)
+
+    return html
+
+
+def _convert_markdown_headers(text: str) -> str:
+    """Convert markdown headers to HTML."""
+    lines = text.split('\n')
+    result = []
+
+    for line in lines:
+        if line.startswith('# '):
+            result.append(f'<h1>{line[2:]}</h1>')
+        elif line.startswith('## '):
+            result.append(f'<h2>{line[3:]}</h2>')
+        elif line.startswith('### '):
+            result.append(f'<h3>{line[4:]}</h3>')
+        elif line.startswith('#### '):
+            result.append(f'<h4>{line[5:]}</h4>')
+        else:
+            result.append(line)
+
+    return '\n'.join(result)
+
+
+def _convert_markdown_code_blocks(text: str) -> str:
+    """Convert markdown code blocks to HTML."""
+    import re
+
+    # Convert ``` code blocks
+    text = re.sub(r'```([^\n]*)\n(.*?)```', r'<div class="evidence"><pre>\2</pre></div>', text, flags=re.DOTALL)
+
+    # Convert inline code
+    text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
+
+    return text
+
+
+def _convert_markdown_tables(text: str) -> str:
+    """Convert markdown tables to HTML."""
+    lines = text.split('\n')
+    result = []
+    in_table = False
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Check if this is a table row
+        if '|' in line and line.strip().startswith('|'):
+            if not in_table:
+                result.append('<table class="risk-matrix">')
+                in_table = True
+
+                # First row is header
+                cells = [c.strip() for c in line.split('|')[1:-1]]
+                result.append('<thead><tr>')
+                for cell in cells:
+                    result.append(f'<th>{cell}</th>')
+                result.append('</tr></thead><tbody>')
+
+                # Skip separator line
+                i += 1
+                if i < len(lines) and '|' in lines[i] and '-' in lines[i]:
+                    i += 1
+                    continue
+            else:
+                # Data row
+                cells = [c.strip() for c in line.split('|')[1:-1]]
+                result.append('<tr>')
+                for cell in cells:
+                    result.append(f'<td>{cell}</td>')
+                result.append('</tr>')
+        else:
+            if in_table:
+                result.append('</tbody></table>')
+                in_table = False
+            result.append(line)
+
+        i += 1
+
+    if in_table:
+        result.append('</tbody></table>')
+
+    return '\n'.join(result)
+
+
+def _convert_markdown_lists(text: str) -> str:
+    """Convert markdown lists to HTML."""
+    lines = text.split('\n')
+    result = []
+    in_list = False
+
+    for line in lines:
+        if line.strip().startswith('- ') or line.strip().startswith('* '):
+            if not in_list:
+                result.append('<ul>')
+                in_list = True
+            result.append(f'<li>{line.strip()[2:]}</li>')
+        elif line.strip().startswith(tuple(f'{i}. ' for i in range(10))):
+            if not in_list:
+                result.append('<ol>')
+                in_list = True
+            # Extract text after number
+            text_part = '. '.join(line.strip().split('. ')[1:])
+            result.append(f'<li>{text_part}</li>')
+        else:
+            if in_list:
+                result.append('</ul>')
+                in_list = False
+            result.append(line)
+
+    if in_list:
+        result.append('</ul>')
+
+    return '\n'.join(result)
+
+
+def _convert_markdown_emphasis(text: str) -> str:
+    """Convert markdown bold/italic to HTML."""
+    import re
+
+    # Bold
+    text = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', text)
+
+    # Italic
+    text = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', text)
+
+    return text
+
+
+def _convert_markdown_links(text: str) -> str:
+    """Convert markdown links to HTML."""
+    import re
+
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+
+    return text
+
+
+def _add_severity_styling(text: str) -> str:
+    """Add severity badge styling."""
+    text = text.replace('CRITICAL', '<span class="severity-badge severity-critical">CRITICAL</span>')
+    text = text.replace('HIGH', '<span class="severity-badge severity-high">HIGH</span>')
+    text = text.replace('MEDIUM', '<span class="severity-badge severity-medium">MEDIUM</span>')
+    text = text.replace('LOW', '<span class="severity-badge severity-low">LOW</span>')
+
+    return text
+
+
+def _wrap_paragraphs(text: str) -> str:
+    """Wrap text in paragraph tags."""
+    lines = text.split('\n')
+    result = []
+    in_tag = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Check if line is already in an HTML tag
+        if stripped.startswith('<'):
+            in_tag = True
+            result.append(line)
+            if '>' in stripped and not stripped.startswith('<!--'):
+                # Check if tag closes on same line
+                if stripped.count('<') == stripped.count('>'):
+                    in_tag = False
+        elif stripped.endswith('>'):
+            result.append(line)
+            in_tag = False
+        elif not in_tag and stripped and not stripped.startswith('---'):
+            result.append(f'<p>{line}</p>')
+        else:
+            result.append(line)
+
+    return '\n'.join(result)
+
+
+def _markdown_to_html_fallback(markdown_content: str) -> str:
+    """Fallback HTML conversion (simple wrapper)."""
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -679,44 +931,14 @@ def _markdown_to_html(markdown_content: str) -> str:
             padding: 20px;
             line-height: 1.6;
         }}
-        h1 {{
-            color: #2c3e50;
-            border-bottom: 3px solid #3498db;
-            padding-bottom: 10px;
-        }}
-        h2 {{
-            color: #34495e;
-            border-bottom: 2px solid #95a5a6;
-            padding-bottom: 5px;
-        }}
-        h3 {{
-            color: #7f8c8d;
-        }}
-        table {{
-            border-collapse: collapse;
-            width: 100%;
-            margin: 20px 0;
-        }}
-        th, td {{
-            border: 1px solid #ddd;
-            padding: 12px;
-            text-align: left;
-        }}
-        th {{
-            background-color: #3498db;
-            color: white;
-        }}
-        code {{
-            background-color: #f4f4f4;
-            padding: 2px 6px;
-            border-radius: 3px;
-        }}
-        pre {{
-            background-color: #f4f4f4;
-            padding: 15px;
-            border-radius: 5px;
-            overflow-x: auto;
-        }}
+        h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }}
+        h2 {{ color: #34495e; border-bottom: 2px solid #95a5a6; padding-bottom: 5px; }}
+        h3 {{ color: #7f8c8d; }}
+        table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+        th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+        th {{ background-color: #3498db; color: white; }}
+        code {{ background-color: #f4f4f4; padding: 2px 6px; border-radius: 3px; }}
+        pre {{ background-color: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }}
         .critical {{ color: #c0392b; font-weight: bold; }}
         .high {{ color: #e74c3c; font-weight: bold; }}
         .medium {{ color: #f39c12; font-weight: bold; }}
@@ -724,13 +946,9 @@ def _markdown_to_html(markdown_content: str) -> str:
     </style>
 </head>
 <body>
-{markdown_content.replace('**CRITICAL**', '<span class="critical">CRITICAL</span>')
-                 .replace('**HIGH**', '<span class="high">HIGH</span>')
-                 .replace('**MEDIUM**', '<span class="medium">MEDIUM</span>')
-                 .replace('**LOW**', '<span class="low">LOW</span>')}
+{markdown_content}
 </body>
 </html>"""
-
     return html
 
 
