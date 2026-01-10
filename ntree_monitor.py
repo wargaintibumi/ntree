@@ -7,12 +7,14 @@ or consuming any Claude API quota. It watches:
 - Agent logs for iteration progress
 - Engagement directories for new findings/scans
 - State changes and discovered assets
+- Automatically switches to new engagements when started
 
 Usage:
-    ./ntree_monitor.py                      # Auto-detect latest engagement
+    ./ntree_monitor.py                      # Auto-detect and follow new engagements
     ./ntree_monitor.py --engagement eng_20260110_123456
     ./ntree_monitor.py --log-only           # Only show log output
     ./ntree_monitor.py --findings-only      # Only show new findings
+    ./ntree_monitor.py --no-follow          # Don't auto-switch to new engagements
 """
 
 import argparse
@@ -49,8 +51,9 @@ def print_banner():
     """Print monitor banner."""
     print(colored("""
 ╔═══════════════════════════════════════════════════════════════════╗
-║                  NTREE LIVE MONITOR v1.0                          ║
+║                  NTREE LIVE MONITOR v1.1                          ║
 ║              Real-time Penetration Test Viewer                    ║
+║           (Auto-follows new engagements by default)               ║
 ╚═══════════════════════════════════════════════════════════════════╝
 """, Colors.CYAN))
 
@@ -67,13 +70,16 @@ def format_timestamp(ts: str) -> str:
 class NTREEMonitor:
     """Live monitor for NTREE penetration tests."""
 
-    def __init__(self, ntree_home: str = None, engagement_id: str = None):
+    def __init__(self, ntree_home: str = None, engagement_id: str = None, follow_new: bool = True):
         self.ntree_home = Path(ntree_home or os.getenv("NTREE_HOME", "~/ntree")).expanduser()
         self.logs_dir = self.ntree_home / "logs"
         self.engagements_dir = self.ntree_home / "engagements"
 
         self.engagement_id = engagement_id
         self.engagement_dir: Optional[Path] = None
+        self.engagement_mtime: float = 0  # Track engagement creation time
+        self.fixed_engagement = engagement_id is not None  # User specified specific engagement
+        self.follow_new = follow_new and not self.fixed_engagement  # Auto-follow new engagements
 
         # Tracking state
         self.last_log_position = 0
@@ -111,9 +117,9 @@ class NTREEMonitor:
         engagement_dirs.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         return engagement_dirs[0]
 
-    def setup_engagement(self) -> bool:
+    def setup_engagement(self, silent: bool = False) -> bool:
         """Setup engagement directory to monitor."""
-        if self.engagement_id:
+        if self.fixed_engagement and self.engagement_id:
             self.engagement_dir = self.engagements_dir / self.engagement_id
             if not self.engagement_dir.exists():
                 print(colored(f"[ERROR] Engagement not found: {self.engagement_id}", Colors.RED))
@@ -121,13 +127,73 @@ class NTREEMonitor:
         else:
             self.engagement_dir = self.find_latest_engagement()
             if not self.engagement_dir:
-                print(colored("[WARN] No engagement found yet. Waiting...", Colors.YELLOW))
+                if not silent:
+                    print(colored("[WARN] No engagement found yet. Waiting...", Colors.YELLOW))
                 return False
             self.engagement_id = self.engagement_dir.name
 
-        print(colored(f"[*] Monitoring engagement: {self.engagement_id}", Colors.GREEN))
-        print(colored(f"[*] Directory: {self.engagement_dir}", Colors.GRAY))
+        # Track engagement creation time
+        self.engagement_mtime = self.engagement_dir.stat().st_mtime
+
+        if not silent:
+            print(colored(f"[*] Monitoring engagement: {self.engagement_id}", Colors.GREEN))
+            print(colored(f"[*] Directory: {self.engagement_dir}", Colors.GRAY))
+            if self.follow_new:
+                print(colored("[*] Auto-follow enabled: will switch to new engagements", Colors.GRAY))
         return True
+
+    def reset_tracking_state(self):
+        """Reset all tracking state when switching to new engagement."""
+        self.seen_findings.clear()
+        self.seen_scans.clear()
+        self.last_state_hash = None
+        self.last_iteration = 0
+        self.stats = {
+            "iterations": 0,
+            "findings": 0,
+            "scans": 0,
+            "hosts": 0,
+            "services": 0,
+            "start_time": datetime.now()
+        }
+
+    def check_for_new_engagement(self) -> Optional[Path]:
+        """Check if a newer engagement exists."""
+        if not self.follow_new:
+            return None
+
+        latest = self.find_latest_engagement()
+        if not latest:
+            return None
+
+        # Check if this is a newer engagement
+        latest_mtime = latest.stat().st_mtime
+        if latest_mtime > self.engagement_mtime and latest.name != self.engagement_id:
+            return latest
+
+        return None
+
+    def switch_to_engagement(self, new_engagement: Path):
+        """Switch monitoring to a new engagement."""
+        old_id = self.engagement_id
+
+        # Reset state
+        self.reset_tracking_state()
+
+        # Setup new engagement
+        self.engagement_id = new_engagement.name
+        self.engagement_dir = new_engagement
+        self.engagement_mtime = new_engagement.stat().st_mtime
+
+        # Announce the switch
+        print("\r" + " " * 80 + "\r", end="")  # Clear status line
+        print(colored(f"\n{'='*60}", Colors.GREEN))
+        print(colored(f"[NEW ENGAGEMENT DETECTED]", Colors.GREEN + Colors.BOLD))
+        print(colored(f"{'='*60}", Colors.GREEN))
+        print(colored(f"  Previous: {old_id}", Colors.GRAY))
+        print(colored(f"  Switching to: {self.engagement_id}", Colors.GREEN))
+        print(colored(f"  Directory: {self.engagement_dir}", Colors.GRAY))
+        print(colored(f"{'='*60}\n", Colors.GREEN))
 
     def print_status_line(self):
         """Print current status summary line."""
@@ -212,6 +278,13 @@ class NTREEMonitor:
         if "PENETRATION TEST COMPLETE" in message:
             return {
                 "type": "complete",
+                "timestamp": timestamp
+            }
+
+        # Detect new pentest start
+        if "STARTING AUTONOMOUS PENETRATION TEST" in message:
+            return {
+                "type": "new_pentest",
                 "timestamp": timestamp
             }
 
@@ -384,6 +457,13 @@ class NTREEMonitor:
                                     f"\n{Colors.GREEN}{'='*60}\n[COMPLETE] Penetration test finished!\n{'='*60}{Colors.NC}"
                                 )
 
+                            elif parsed["type"] == "new_pentest":
+                                output_lines.append(
+                                    f"\n{Colors.CYAN}{'='*60}\n[NEW PENTEST] Starting autonomous penetration test...\n{'='*60}{Colors.NC}"
+                                )
+                                # Check for new engagement shortly after
+                                await asyncio.sleep(2)
+
                             elif parsed["type"] == "error":
                                 output_lines.append(
                                     f"  {Colors.RED}[ERROR]{Colors.NC} {parsed['message'][:100]}"
@@ -396,7 +476,16 @@ class NTREEMonitor:
 
                 # Check for engagement if not set
                 if not self.engagement_dir:
-                    self.setup_engagement()
+                    if self.setup_engagement(silent=True):
+                        output_lines.append(
+                            f"\n{Colors.GREEN}[*] Now monitoring: {self.engagement_id}{Colors.NC}"
+                        )
+
+                # Check for new engagement (auto-follow)
+                if self.follow_new and self.engagement_dir:
+                    new_eng = self.check_for_new_engagement()
+                    if new_eng:
+                        self.switch_to_engagement(new_eng)
 
                 # Check findings
                 if not log_only:
@@ -482,6 +571,11 @@ def main():
         action="store_true",
         help="Only show new findings"
     )
+    parser.add_argument(
+        "--no-follow",
+        action="store_true",
+        help="Don't auto-switch to new engagements"
+    )
 
     args = parser.parse_args()
 
@@ -489,7 +583,8 @@ def main():
 
     monitor = NTREEMonitor(
         ntree_home=args.home,
-        engagement_id=args.engagement
+        engagement_id=args.engagement,
+        follow_new=not args.no_follow
     )
 
     # Setup signal handler
