@@ -200,23 +200,21 @@ Work autonomously, make intelligent decisions, and provide actionable security f
             async with ClaudeSDKClient(options=options) as client:
                 logger.info("Claude SDK session started")
 
-                # Send initial prompt
+                # Send initial prompt and collect response
                 logger.info(f"\n{'='*80}")
                 logger.info(f"ITERATION {iteration + 1}/{max_iterations}")
                 logger.info(f"{'='*80}\n")
 
                 await client.query(initial_prompt)
+                response_text = await self._collect_response(client)
                 iteration += 1
 
-                # Collect and process responses
+                # Log initial response
+                if response_text:
+                    logger.info(f"Initial response length: {len(response_text)} chars")
+
+                # Continue processing responses
                 while iteration < max_iterations:
-                    logger.info(f"\n{'='*80}")
-                    logger.info(f"ITERATION {iteration + 1}/{max_iterations}")
-                    logger.info(f"{'='*80}\n")
-
-                    # Collect response
-                    response_text = await self._collect_response(client)
-
                     if not response_text:
                         logger.info("Empty response received")
                         break
@@ -228,11 +226,17 @@ Work autonomously, make intelligent decisions, and provide actionable security f
 
                     # Check if Claude is asking for continuation
                     if self._needs_continuation(response_text):
+                        logger.info(f"\n{'='*80}")
+                        logger.info(f"ITERATION {iteration + 1}/{max_iterations}")
+                        logger.info(f"{'='*80}\n")
+
                         continuation = "Continue with the next phase of testing. What should we do next?"
                         await client.query(continuation)
+                        response_text = await self._collect_response(client)
                         iteration += 1
                     else:
                         # Claude stopped naturally
+                        logger.info("Claude completed without requesting continuation")
                         break
 
         except Exception as e:
