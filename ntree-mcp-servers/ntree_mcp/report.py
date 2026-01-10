@@ -24,12 +24,12 @@ app = Server("ntree-report")
 
 class ScoreRiskArgs(BaseModel):
     """Arguments for score_risk tool."""
-    engagement_id: str = Field(description="Engagement ID to score")
+    assessment_id: str = Field(description="Assessment ID to score")
 
 
 class GenerateReportArgs(BaseModel):
     """Arguments for generate_report tool."""
-    engagement_id: str = Field(description="Engagement ID to generate report for")
+    assessment_id: str = Field(description="Assessment ID to generate report for")
     format: str = Field(
         default="comprehensive",
         description="Report format: executive, technical, or comprehensive"
@@ -46,7 +46,7 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="score_risk",
-            description="Calculate risk scores and aggregate findings from an engagement",
+            description="Calculate risk scores and aggregate findings from an assessment",
             inputSchema=ScoreRiskArgs.model_json_schema()
         ),
         Tool(
@@ -63,13 +63,13 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     try:
         if name == "score_risk":
             args = ScoreRiskArgs(**arguments)
-            result = await score_risk(args.engagement_id)
+            result = await score_risk(args.assessment_id)
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == "generate_report":
             args = GenerateReportArgs(**arguments)
             result = await generate_report(
-                args.engagement_id,
+                args.assessment_id,
                 args.format,
                 args.output_format
             )
@@ -85,17 +85,17 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps(error_result, indent=2))]
 
 
-async def score_risk(engagement_id: str) -> dict:
+async def score_risk(assessment_id: str) -> dict:
     """
-    Calculate risk scores from engagement findings.
+    Calculate risk scores from assessment findings.
 
     Args:
-        engagement_id: Engagement ID
+        assessment_id: Assessment ID
 
     Returns:
         {
             "status": "success",
-            "engagement_id": "eng_20250108_103045",
+            "assessment_id": "assess_20250108_103045",
             "overall_risk": "critical",
             "risk_matrix": {
                 "critical": 2,
@@ -110,30 +110,30 @@ async def score_risk(engagement_id: str) -> dict:
         }
     """
     try:
-        logger.info(f"Scoring risk for engagement {engagement_id}")
+        logger.info(f"Scoring risk for assessment {assessment_id}")
 
-        # Get engagement directory
+        # Get assessment directory
         ntree_home = Path(os.getenv("NTREE_HOME", str(Path.home() / "ntree")))
-        engagement_dir = ntree_home / "engagements" / engagement_id
+        assessment_dir = ntree_home / "assessments" / assessment_id
 
-        if not engagement_dir.exists():
+        if not assessment_dir.exists():
             return {
                 "status": "error",
-                "error": f"Engagement {engagement_id} not found"
+                "error": f"Assessment {assessment_id} not found"
             }
 
         # Load state file
-        state_file = engagement_dir / "state.json"
+        state_file = assessment_dir / "state.json"
         if not state_file.exists():
             return {
                 "status": "error",
-                "error": f"State file not found for engagement {engagement_id}"
+                "error": f"State file not found for assessment {assessment_id}"
             }
 
         state = json.loads(state_file.read_text())
 
         # Load all findings
-        findings_dir = engagement_dir / "findings"
+        findings_dir = assessment_dir / "findings"
         findings = []
 
         if findings_dir.exists():
@@ -154,7 +154,7 @@ async def score_risk(engagement_id: str) -> dict:
 
         result = {
             "status": "success",
-            "engagement_id": engagement_id,
+            "assessment_id": assessment_id,
             "overall_risk": overall_risk,
             "risk_matrix": risk_matrix,
             "cvss_average": cvss_average,
@@ -174,7 +174,7 @@ async def score_risk(engagement_id: str) -> dict:
         return result
 
     except Exception as e:
-        logger.error(f"Error scoring risk for {engagement_id}: {e}", exc_info=True)
+        logger.error(f"Error scoring risk for {assessment_id}: {e}", exc_info=True)
         return {
             "status": "error",
             "error": str(e)
@@ -284,7 +284,7 @@ def _assess_business_impact(risk_matrix: dict, critical_paths: list) -> str:
 
 
 def _calculate_metrics(findings: List[dict], state: dict) -> dict:
-    """Calculate engagement metrics."""
+    """Calculate assessment metrics."""
     discovered_assets = state.get('discovered_assets', {})
 
     return {
@@ -298,7 +298,7 @@ def _calculate_metrics(findings: List[dict], state: dict) -> dict:
 
 
 def _calculate_duration(state: dict) -> float:
-    """Calculate engagement duration in hours."""
+    """Calculate assessment duration in hours."""
     try:
         created = datetime.fromisoformat(state.get('created', ''))
         updated = datetime.fromisoformat(state.get('updated', ''))
@@ -309,7 +309,7 @@ def _calculate_duration(state: dict) -> float:
 
 
 async def generate_report(
-    engagement_id: str,
+    assessment_id: str,
     format: str = "comprehensive",
     output_format: str = "markdown"
 ) -> dict:
@@ -317,37 +317,37 @@ async def generate_report(
     Generate penetration test report.
 
     Args:
-        engagement_id: Engagement ID
+        assessment_id: Assessment ID
         format: Report format (executive, technical, comprehensive)
         output_format: Output format (markdown, html)
 
     Returns:
         {
             "status": "success",
-            "engagement_id": "eng_20250108_103045",
+            "assessment_id": "assess_20250108_103045",
             "report_path": "/path/to/report.md",
             "format": "comprehensive",
             "findings_count": 27
         }
     """
     try:
-        logger.info(f"Generating {format} report for engagement {engagement_id}")
+        logger.info(f"Generating {format} report for assessment {assessment_id}")
 
-        # Get engagement directory
+        # Get assessment directory
         ntree_home = Path(os.getenv("NTREE_HOME", str(Path.home() / "ntree")))
-        engagement_dir = ntree_home / "engagements" / engagement_id
+        assessment_dir = ntree_home / "assessments" / assessment_id
 
-        if not engagement_dir.exists():
+        if not assessment_dir.exists():
             return {
                 "status": "error",
-                "error": f"Engagement {engagement_id} not found"
+                "error": f"Assessment {assessment_id} not found"
             }
 
         # Load state and findings
-        state_file = engagement_dir / "state.json"
+        state_file = assessment_dir / "state.json"
         state = json.loads(state_file.read_text())
 
-        findings_dir = engagement_dir / "findings"
+        findings_dir = assessment_dir / "findings"
         findings = []
 
         if findings_dir.exists():
@@ -365,7 +365,7 @@ async def generate_report(
         # Get or calculate risk assessment
         risk_assessment = state.get('risk_assessment', {})
         if not risk_assessment:
-            risk_assessment = await score_risk(engagement_id)
+            risk_assessment = await score_risk(assessment_id)
 
         # Generate report based on format
         if format == "executive":
@@ -376,7 +376,7 @@ async def generate_report(
             content = _generate_comprehensive_report(state, findings, risk_assessment)
 
         # Save report
-        reports_dir = engagement_dir / "reports"
+        reports_dir = assessment_dir / "reports"
         reports_dir.mkdir(exist_ok=True)
 
         if output_format == "html":
@@ -388,7 +388,7 @@ async def generate_report(
             # Render using template
             html_content = _render_html_template(
                 title=f"{format.capitalize()} Report",
-                engagement_id=engagement_id,
+                assessment_id=assessment_id,
                 test_date=state.get('created', 'Unknown'),
                 duration=risk_assessment.get('metrics', {}).get('duration_hours', 0),
                 overall_risk=risk_assessment.get('overall_risk', 'unknown'),
@@ -403,7 +403,7 @@ async def generate_report(
 
         return {
             "status": "success",
-            "engagement_id": engagement_id,
+            "assessment_id": assessment_id,
             "report_path": str(report_path),
             "format": format,
             "output_format": output_format,
@@ -412,7 +412,7 @@ async def generate_report(
         }
 
     except Exception as e:
-        logger.error(f"Error generating report for {engagement_id}: {e}", exc_info=True)
+        logger.error(f"Error generating report for {assessment_id}: {e}", exc_info=True)
         return {
             "status": "error",
             "error": str(e)
@@ -423,9 +423,9 @@ def _generate_executive_report(state: dict, findings: List[dict], risk: dict) ->
     """Generate executive summary report."""
     report = f"""# Penetration Test Executive Summary
 
-## Engagement Information
+## Assessment Information
 
-**Engagement ID**: {state.get('engagement_id', 'Unknown')}
+**Assessment ID**: {state.get('assessment_id', 'Unknown')}
 **Test Date**: {state.get('created', 'Unknown')}
 **Duration**: {risk.get('metrics', {}).get('duration_hours', 0)} hours
 **Overall Risk**: **{risk.get('overall_risk', 'Unknown').upper()}**
@@ -511,7 +511,7 @@ This assessment identified significant security concerns that require immediate 
 ---
 
 *Generated by NTREE v2.0*
-*Engagement ID: {state.get('engagement_id', 'Unknown')}*
+*Assessment ID: {state.get('assessment_id', 'Unknown')}*
 """
 
     return report
@@ -521,9 +521,9 @@ def _generate_technical_report(state: dict, findings: List[dict], risk: dict) ->
     """Generate technical findings report."""
     report = f"""# Penetration Test Technical Report
 
-## Engagement Details
+## Assessment Details
 
-- **Engagement ID**: {state.get('engagement_id', 'Unknown')}
+- **Assessment ID**: {state.get('assessment_id', 'Unknown')}
 - **Scope**: {', '.join(state.get('scope', {}).get('targets', ['Unknown']))}
 - **Start Date**: {state.get('created', 'Unknown')}
 - **End Date**: {state.get('updated', 'Unknown')}
@@ -677,7 +677,7 @@ def _format_references(references: list) -> str:
 
 def _render_html_template(
     title: str,
-    engagement_id: str,
+    assessment_id: str,
     test_date: str,
     duration: float,
     overall_risk: str,
@@ -697,7 +697,7 @@ def _render_html_template(
 
         # Replace template variables
         html = template.replace("{{ title }}", title)
-        html = html.replace("{{ engagement_id }}", engagement_id)
+        html = html.replace("{{ assessment_id }}", assessment_id)
         html = html.replace("{{ test_date }}", test_date)
         html = html.replace("{{ duration }}", str(duration))
         html = html.replace("{{ overall_risk }}", overall_risk.lower())

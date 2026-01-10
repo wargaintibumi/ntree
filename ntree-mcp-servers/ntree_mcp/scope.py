@@ -1,6 +1,6 @@
 """
 NTREE Scope Validation MCP Server
-Manages engagement initialization and scope validation
+Manages assessment initialization and scope validation
 """
 
 import asyncio
@@ -22,15 +22,16 @@ logger = get_logger(__name__)
 # Initialize MCP server
 app = Server("ntree-scope")
 
-# Global scope validator (set during init_engagement)
+# Global scope validator (set during init_assessment)
 _scope_validator: Optional[ScopeValidator] = None
-_current_engagement_id: Optional[str] = None
+_current_assessment_id: Optional[str] = None
 
 
-class InitEngagementArgs(BaseModel):
-    """Arguments for init_engagement tool."""
+class InitAssessmentArgs(BaseModel):
+    """Arguments for init_assessment tool."""
     scope_file: str = Field(description="Path to scope file containing authorized targets")
-    roe_file: str = Field(default="", description="Path to rules of engagement file (optional)")
+    title: str = Field(default="", description="Assessment title (e.g., 'Internal Network Pentest'). If empty, uses timestamp.")
+    roe_file: str = Field(default="", description="Path to rules of assessment file (optional)")
 
 
 class VerifyScopeArgs(BaseModel):
@@ -59,14 +60,19 @@ class UpdateStateArgs(BaseModel):
     credentials: list = Field(default=[], description="Discovered credentials to add (username:service:access_level)")
 
 
+class CompleteAssessmentArgs(BaseModel):
+    """Arguments for complete_assessment tool."""
+    pass  # Uses current assessment ID
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available MCP tools."""
     return [
         Tool(
-            name="init_engagement",
-            description="Initialize penetration test engagement with scope and ROE validation. Must be called before any other actions.",
-            inputSchema=InitEngagementArgs.model_json_schema()
+            name="init_assessment",
+            description="Initialize penetration test assessment with scope and ROE validation. Must be called before any other actions.",
+            inputSchema=InitAssessmentArgs.model_json_schema()
         ),
         Tool(
             name="verify_scope",
@@ -80,8 +86,13 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="update_state",
-            description="Update engagement state with discovered assets (hosts, services, credentials) and current phase.",
+            description="Update assessment state with discovered assets (hosts, services, credentials) and current phase.",
             inputSchema=UpdateStateArgs.model_json_schema()
+        ),
+        Tool(
+            name="complete_assessment",
+            description="Mark assessment as complete and automatically generate comprehensive HTML report with all findings.",
+            inputSchema=CompleteAssessmentArgs.model_json_schema()
         ),
     ]
 
@@ -90,9 +101,9 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: Any) -> list[TextContent]:
     """Handle tool invocations."""
     try:
-        if name == "init_engagement":
-            args = InitEngagementArgs(**arguments)
-            result = await init_engagement(args.scope_file, args.roe_file)
+        if name == "init_assessment":
+            args = InitAssessmentArgs(**arguments)
+            result = await init_assessment(args.scope_file, args.title, args.roe_file)
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == "verify_scope":
@@ -125,9 +136,13 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             )
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
+        elif name == "complete_assessment":
+            result = await complete_assessment()
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
         else:
             error_result = {"status": "error", "error": f"Unknown tool: {name}"}
-            return [TextContent(type="text", text=json.dumps(error_result, indent=2))]
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     except Exception as e:
         logger.error(f"Error in call_tool({name}): {e}", exc_info=True)
@@ -135,18 +150,20 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps(error_result, indent=2))]
 
 
-async def init_engagement(scope_file: str, roe_file: str = "") -> dict:
+async def init_assessment(scope_file: str, title: str = "", roe_file: str = "") -> dict:
     """
-    Initialize engagement with scope and ROE validation.
+    Initialize assessment with scope and ROE validation.
 
     Args:
         scope_file: Path to scope file
-        roe_file: Path to rules of engagement file (optional)
+        title: Assessment title (if empty, uses timestamp)
+        roe_file: Path to rules of assessment file (optional)
 
     Returns:
         {
             "status": "success",
-            "engagement_id": "eng_20250108_103045",
+            "assessment_id": "internal_network_pentest" or "assess_20250108_103045",
+            "title": "Internal Network Pentest",
             "validated_scope": {
                 "included_ranges": ["192.168.1.0/24"],
                 "included_ips": ["10.0.0.50"],
@@ -155,13 +172,13 @@ async def init_engagement(scope_file: str, roe_file: str = "") -> dict:
                 "excluded_ranges": []
             },
             "restrictions": {...},
-            "engagement_dir": "/home/pi/ntree/engagements/eng_20250108_103045"
+            "assessment_dir": "/home/pi/ntree/assessments/internal_network_pentest"
         }
     """
-    global _scope_validator, _current_engagement_id
+    global _scope_validator, _current_assessment_id
 
     try:
-        logger.info(f"Initializing engagement with scope file: {scope_file}")
+        logger.info(f"Initializing assessment with scope file: {scope_file}")
 
         # Expand path
         scope_path = Path(scope_file).expanduser().resolve()
@@ -175,21 +192,31 @@ async def init_engagement(scope_file: str, roe_file: str = "") -> dict:
         # Initialize scope validator
         _scope_validator = ScopeValidator(scope_path)
 
-        # Generate engagement ID
-        _current_engagement_id = f"eng_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Generate assessment ID from title or timestamp
+        if title:
+            # Convert title to safe directory name
+            safe_title = title.lower().replace(" ", "_").replace("-", "_")
+            # Remove unsafe characters
+            import re
+            safe_title = re.sub(r'[^a-z0-9_]', '', safe_title)
+            _current_assessment_id = safe_title
+        else:
+            # Use timestamp if no title provided
+            _current_assessment_id = f"assess_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            title = _current_assessment_id
 
-        # Create engagement directory structure
+        # Create assessment directory structure
         ntree_home = Path(os.getenv("NTREE_HOME", str(Path.home() / "ntree")))
-        engagement_dir = ntree_home / "engagements" / _current_engagement_id
+        assessment_dir = ntree_home / "assessments" / _current_assessment_id
 
-        engagement_dir.mkdir(parents=True, exist_ok=True)
-        (engagement_dir / "scans").mkdir(exist_ok=True)
-        (engagement_dir / "findings").mkdir(exist_ok=True)
-        (engagement_dir / "evidence").mkdir(exist_ok=True)
-        (engagement_dir / "credentials").mkdir(exist_ok=True)
-        (engagement_dir / "reports").mkdir(exist_ok=True)
+        assessment_dir.mkdir(parents=True, exist_ok=True)
+        (assessment_dir / "scans").mkdir(exist_ok=True)
+        (assessment_dir / "findings").mkdir(exist_ok=True)
+        (assessment_dir / "evidence").mkdir(exist_ok=True)
+        (assessment_dir / "credentials").mkdir(exist_ok=True)
+        (assessment_dir / "reports").mkdir(exist_ok=True)
 
-        logger.info(f"Created engagement directory: {engagement_dir}")
+        logger.info(f"Created assessment directory: {assessment_dir}")
 
         # Parse ROE if provided
         restrictions = {}
@@ -201,19 +228,20 @@ async def init_engagement(scope_file: str, roe_file: str = "") -> dict:
                 restrictions["roe_file"] = str(roe_path)
                 logger.info(f"Loaded ROE file: {roe_path}")
 
-        # Save scope to engagement directory
-        scope_copy = engagement_dir / "scope.txt"
+        # Save scope to assessment directory
+        scope_copy = assessment_dir / "scope.txt"
         scope_copy.write_text(scope_path.read_text())
 
         # Create initial state file
         state = {
-            "engagement_id": _current_engagement_id,
+            "assessment_id": _current_assessment_id,
+            "title": title,
             "created": datetime.now().isoformat(),
             "updated": datetime.now().isoformat(),
             "phase": "INITIALIZATION",
             "scope_file": str(scope_path),
             "roe_file": restrictions.get("roe_file", ""),
-            "engagement_dir": str(engagement_dir),
+            "assessment_dir": str(assessment_dir),
             "discovered_assets": {
                 "hosts": [],
                 "services": [],
@@ -223,14 +251,15 @@ async def init_engagement(scope_file: str, roe_file: str = "") -> dict:
             "action_history": []
         }
 
-        state_file = engagement_dir / "state.json"
+        state_file = assessment_dir / "state.json"
         state_file.write_text(json.dumps(state, indent=2))
 
-        logger.info(f"Engagement {_current_engagement_id} initialized successfully")
+        logger.info(f"Assessment {_current_assessment_id} initialized successfully")
 
         return {
             "status": "success",
-            "engagement_id": _current_engagement_id,
+            "assessment_id": _current_assessment_id,
+            "title": title,
             "validated_scope": {
                 "included_ranges": [str(r) for r in _scope_validator.included_ranges],
                 "included_ips": [str(ip) for ip in _scope_validator.included_ips],
@@ -240,11 +269,11 @@ async def init_engagement(scope_file: str, roe_file: str = "") -> dict:
             },
             "scope_summary": _scope_validator.get_scope_summary(),
             "restrictions": restrictions,
-            "engagement_dir": str(engagement_dir),
+            "assessment_dir": str(assessment_dir),
         }
 
     except Exception as e:
-        logger.error(f"Error initializing engagement: {e}", exc_info=True)
+        logger.error(f"Error initializing assessment: {e}", exc_info=True)
         return {
             "status": "error",
             "error": str(e)
@@ -270,7 +299,7 @@ async def verify_scope(target: str) -> dict:
     if not _scope_validator:
         return {
             "in_scope": False,
-            "reason": "Engagement not initialized. Call init_engagement first.",
+            "reason": "Assessment not initialized. Call init_assessment first.",
             "target": target
         }
 
@@ -286,7 +315,7 @@ async def verify_scope(target: str) -> dict:
             "in_scope": in_scope,
             "reason": reason,
             "target": target,
-            "engagement_id": _current_engagement_id
+            "assessment_id": _current_assessment_id
         }
 
     except Exception as e:
@@ -310,7 +339,7 @@ async def save_finding(
     exploitable: bool = False
 ) -> dict:
     """
-    Save a security finding to the engagement directory.
+    Save a security finding to the assessment directory.
 
     Args:
         title: Finding title
@@ -330,19 +359,19 @@ async def save_finding(
             "finding_path": "/path/to/finding.json"
         }
     """
-    global _current_engagement_id
+    global _current_assessment_id
 
-    if not _current_engagement_id:
+    if not _current_assessment_id:
         return {
             "status": "error",
-            "error": "Engagement not initialized. Call init_engagement first."
+            "error": "Assessment not initialized. Call init_assessment first."
         }
 
     try:
-        # Get engagement directory
+        # Get assessment directory
         ntree_home = Path(os.getenv("NTREE_HOME", str(Path.home() / "ntree")))
-        engagement_dir = ntree_home / "engagements" / _current_engagement_id
-        findings_dir = engagement_dir / "findings"
+        assessment_dir = ntree_home / "assessments" / _current_assessment_id
+        findings_dir = assessment_dir / "findings"
 
         # Generate finding ID
         existing_findings = list(findings_dir.glob("finding_*.json"))
@@ -362,7 +391,7 @@ async def save_finding(
             "references": references or [],
             "exploitable": exploitable,
             "discovered_at": datetime.now().isoformat(),
-            "engagement_id": _current_engagement_id
+            "assessment_id": _current_assessment_id
         }
 
         # Save finding to file
@@ -370,7 +399,7 @@ async def save_finding(
         finding_path.write_text(json.dumps(finding, indent=2))
 
         # Update state file with finding reference
-        state_file = engagement_dir / "state.json"
+        state_file = assessment_dir / "state.json"
         if state_file.exists():
             state = json.loads(state_file.read_text())
             if "findings" not in state:
@@ -408,7 +437,7 @@ async def update_state(
     credentials: list = None
 ) -> dict:
     """
-    Update engagement state with discovered assets.
+    Update assessment state with discovered assets.
 
     Args:
         phase: Current phase
@@ -425,24 +454,24 @@ async def update_state(
             "total_credentials": 3
         }
     """
-    global _current_engagement_id
+    global _current_assessment_id
 
-    if not _current_engagement_id:
+    if not _current_assessment_id:
         return {
             "status": "error",
-            "error": "Engagement not initialized. Call init_engagement first."
+            "error": "Assessment not initialized. Call init_assessment first."
         }
 
     try:
-        # Get engagement directory
+        # Get assessment directory
         ntree_home = Path(os.getenv("NTREE_HOME", str(Path.home() / "ntree")))
-        engagement_dir = ntree_home / "engagements" / _current_engagement_id
-        state_file = engagement_dir / "state.json"
+        assessment_dir = ntree_home / "assessments" / _current_assessment_id
+        state_file = assessment_dir / "state.json"
 
         if not state_file.exists():
             return {
                 "status": "error",
-                "error": f"State file not found for engagement {_current_engagement_id}"
+                "error": f"State file not found for assessment {_current_assessment_id}"
             }
 
         # Load current state
@@ -496,7 +525,7 @@ async def update_state(
 
         return {
             "status": "success",
-            "engagement_id": _current_engagement_id,
+            "assessment_id": _current_assessment_id,
             "phase": state.get("phase", "UNKNOWN"),
             "total_hosts": len(state["discovered_assets"]["hosts"]),
             "total_services": len(state["discovered_assets"]["services"]),
@@ -506,6 +535,124 @@ async def update_state(
 
     except Exception as e:
         logger.error(f"Error updating state: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+async def complete_assessment() -> dict:
+    """
+    Mark assessment as complete and generate HTML reports.
+
+    Returns:
+        {
+            "status": "success",
+            "assessment_id": "...",
+            "phase": "COMPLETE",
+            "reports": {
+                "comprehensive_html": "/path/to/comprehensive_report.html",
+                "executive_html": "/path/to/executive_report.html"
+            },
+            "risk_assessment": {...},
+            "total_findings": 15
+        }
+    """
+    global _current_assessment_id
+
+    try:
+        if not _current_assessment_id:
+            return {
+                "status": "error",
+                "error": "No active assessment. Call init_assessment first."
+            }
+
+        logger.info(f"Completing assessment {_current_assessment_id}")
+
+        # Get assessment directory
+        ntree_home = Path(os.getenv("NTREE_HOME", str(Path.home() / "ntree")))
+        assessment_dir = ntree_home / "assessments" / _current_assessment_id
+
+        if not assessment_dir.exists():
+            return {
+                "status": "error",
+                "error": f"Assessment directory not found: {assessment_dir}"
+            }
+
+        # Load state
+        state_file = assessment_dir / "state.json"
+        if not state_file.exists():
+            return {
+                "status": "error",
+                "error": "State file not found"
+            }
+
+        state = json.loads(state_file.read_text())
+
+        # Update state to COMPLETE
+        state["phase"] = "COMPLETE"
+        state["updated"] = datetime.now().isoformat()
+        state["completed"] = datetime.now().isoformat()
+        state_file.write_text(json.dumps(state, indent=2))
+
+        logger.info("Assessment marked as COMPLETE, generating reports...")
+
+        # Import report functions
+        from .report import score_risk, generate_report
+
+        # Score risk
+        risk_result = await score_risk(_current_assessment_id)
+
+        # Generate reports (both comprehensive and executive)
+        reports = {}
+
+        # Generate comprehensive HTML report
+        comp_result = await generate_report(
+            _current_assessment_id,
+            format="comprehensive",
+            output_format="html"
+        )
+
+        if comp_result.get("status") == "success":
+            reports["comprehensive_html"] = comp_result["report_path"]
+            logger.info(f"Comprehensive HTML report: {comp_result['report_path']}")
+
+        # Generate executive HTML report
+        exec_result = await generate_report(
+            _current_assessment_id,
+            format="executive",
+            output_format="html"
+        )
+
+        if exec_result.get("status") == "success":
+            reports["executive_html"] = exec_result["report_path"]
+            logger.info(f"Executive HTML report: {exec_result['report_path']}")
+
+        # Generate markdown report as backup
+        md_result = await generate_report(
+            _current_assessment_id,
+            format="comprehensive",
+            output_format="markdown"
+        )
+
+        if md_result.get("status") == "success":
+            reports["comprehensive_md"] = md_result["report_path"]
+
+        logger.info(f"Assessment {_current_assessment_id} completed successfully")
+
+        return {
+            "status": "success",
+            "assessment_id": _current_assessment_id,
+            "title": state.get("title", _current_assessment_id),
+            "phase": "COMPLETE",
+            "reports": reports,
+            "risk_assessment": risk_result if risk_result.get("status") == "success" else {},
+            "total_findings": len(state.get("findings", [])),
+            "summary": f"Assessment completed with {len(state.get('findings', []))} findings. Reports generated in {assessment_dir / 'reports'}"
+        }
+
+    except Exception as e:
+        logger.error(f"Error completing assessment: {e}", exc_info=True)
         return {
             "status": "error",
             "error": str(e)

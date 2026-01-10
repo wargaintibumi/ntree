@@ -276,7 +276,7 @@ install_wordlists() {
 setup_ntree_structure() {
     log_info "Setting up NTREE directory structure..."
 
-    mkdir -p ~/ntree/{engagements,templates,tools,logs}
+    mkdir -p ~/ntree/{assessments,templates,tools,logs}
 
     # Create example scope file
     cat > ~/ntree/templates/scope_example.txt << 'EOF'
@@ -297,7 +297,7 @@ EOF
 
     # Create example ROE file
     cat > ~/ntree/templates/roe_example.txt << 'EOF'
-# Rules of Engagement
+# Rules of Assessment
 
 ENGAGEMENT_TYPE: internal_pentest
 STEALTH_LEVEL: normal
@@ -384,12 +384,12 @@ EOF
     chmod +x ~/ntree/activate.sh
 
     # Create backup script
-    cat > ~/ntree/backup_engagement.sh << 'EOF'
+    cat > ~/ntree/backup_assessment.sh << 'EOF'
 #!/bin/bash
-# Backup NTREE engagement
+# Backup NTREE assessment
 
 if [ -z "$1" ]; then
-    echo "Usage: $0 <engagement_id>"
+    echo "Usage: $0 <assessment_id>"
     exit 1
 fi
 
@@ -399,18 +399,18 @@ DATE=$(date +%Y%m%d_%H%M%S)
 
 mkdir -p $BACKUP_DIR
 
-if [ ! -d "$HOME/ntree/engagements/$ENGAGEMENT_ID" ]; then
-    echo "Error: Engagement $ENGAGEMENT_ID not found"
+if [ ! -d "$HOME/ntree/assessments/$ENGAGEMENT_ID" ]; then
+    echo "Error: Assessment $ENGAGEMENT_ID not found"
     exit 1
 fi
 
 tar -czf "$BACKUP_DIR/${ENGAGEMENT_ID}_${DATE}.tar.gz" \
-    -C "$HOME/ntree/engagements" "$ENGAGEMENT_ID"
+    -C "$HOME/ntree/assessments" "$ENGAGEMENT_ID"
 
 echo "Backup created: $BACKUP_DIR/${ENGAGEMENT_ID}_${DATE}.tar.gz"
 EOF
 
-    chmod +x ~/ntree/backup_engagement.sh
+    chmod +x ~/ntree/backup_assessment.sh
 
     # Create cleanup script
     cat > ~/ntree/cleanup_temp.sh << 'EOF'
@@ -476,7 +476,7 @@ show_next_steps() {
     echo ""
     log_info "NTREE Directory: ${GREEN}~/ntree${NC}"
     log_info "Templates: ${GREEN}~/ntree/templates/${NC}"
-    log_info "Engagements: ${GREEN}~/ntree/engagements/${NC}"
+    log_info "Assessments: ${GREEN}~/ntree/assessments/${NC}"
     log_info "Wordlists (SecLists): ${GREEN}~/wordlists/SecLists${NC}"
     echo ""
     log_info "Wordlist Capabilities:"

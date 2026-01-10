@@ -6,6 +6,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 NTREE (Neural Tactical Red-Team Exploitation Engine) v2.0 is a fully autonomous penetration testing platform for Raspberry Pi 5. It integrates Claude Code, Anthropic API, and MCP servers with security tools (nmap, metasploit, impacket, etc.).
 
+### Key Features (Latest Updates)
+
+1. **Custom Assessment Titles**: Name your assessments with user-friendly titles instead of timestamps
+   - Example: `init_assessment(scope_file, title="Internal Network Pentest")`
+   - Creates directory: `~/ntree/assessments/internal_network_pentest/`
+
+2. **Automatic HTML Report Generation**: Call `complete_assessment` to automatically generate professional HTML reports
+   - Generates comprehensive HTML report
+   - Generates executive HTML report
+   - Includes risk scoring and findings analysis
+
+3. **Wordlist Integration**: Built-in SecLists wordlist search and management
+   - Search 1000+ wordlists by keyword
+   - Access passwords, usernames, subdomains, fuzzing lists
+   - Automatic path resolution
+
+4. **Terminology Update**: Using "assessment" instead of "engagement" throughout codebase
+
 ## Build and Development Commands
 
 ### MCP Servers Setup
@@ -86,7 +104,7 @@ python ntree-autonomous/ntree_agent_sdk.py --scope ~/scope.txt
 
 | Server | Purpose |
 |--------|---------|
-| `scope.py` | Scope validation, engagement init, **save_finding**, **update_state** |
+| `scope.py` | Scope validation, assessment init, **save_finding**, **update_state** |
 | `scan.py` | Network discovery, nmap, passive recon |
 | `enum.py` | Service enumeration (web, SMB, LDAP, etc.), **wordlist search** |
 | `vuln.py` | CVE testing, credential checking, exploit research |
@@ -100,7 +118,7 @@ Utilities in `utils/`: `scope_parser.py`, `command_runner.py`, `nmap_parser.py`,
 For reports to contain real findings, Claude MUST follow this workflow:
 
 ```
-1. init_engagement(scope_file)        → Creates engagement directory
+1. init_assessment(scope_file)        → Creates assessment directory
 2. scan_network(targets)              → Returns real nmap results
 3. save_finding(                      → SAVES finding to findings/*.json
      title="SMB Signing Disabled",
@@ -116,7 +134,7 @@ For reports to contain real findings, Claude MUST follow this workflow:
      hosts=["192.168.1.10", "192.168.1.11"],
      services=["192.168.1.10:445/smb"]
    )
-5. generate_report(engagement_id)     → Reads findings/*.json, generates report
+5. generate_report(assessment_id)     → Reads findings/*.json, generates report
 ```
 
 **Without calling `save_finding()` after discovering vulnerabilities, reports will be empty!**
@@ -249,7 +267,7 @@ The WordlistManager automatically detects SecLists in standard locations:
 
 ## 7-Phase Testing Workflow
 
-0. **Initialization** - Scope validation, engagement setup
+0. **Initialization** - Scope validation, assessment setup
 1. **Reconnaissance** - Network discovery, OS fingerprinting
 2. **Enumeration** - Service detection, versioning
 3. **Attack Surface Mapping** - CVE correlation, exploit research
@@ -257,13 +275,13 @@ The WordlistManager automatically detects SecLists in standard locations:
 5. **Post-Exploitation** - Credential extraction, lateral movement
 6. **Reporting** - Risk scoring, documentation
 
-## Engagement Directory Structure
+## Assessment Directory Structure
 
 ```
-engagements/eng_YYYYMMDD_HHMMSS/
+assessments/eng_YYYYMMDD_HHMMSS/
 ├── scope.txt           # Authorized targets
-├── roe.txt             # Rules of engagement
-├── state.json          # Engagement state
+├── roe.txt             # Rules of assessment
+├── state.json          # Assessment state
 ├── findings/           # Discovered vulnerabilities
 ├── scans/              # Tool outputs (nmap XML, etc.)
 ├── evidence/           # Proof of exploitation

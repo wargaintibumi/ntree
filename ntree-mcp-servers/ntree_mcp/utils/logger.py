@@ -106,14 +106,14 @@ class AuditLogger:
     Ensures all pentest actions are logged for compliance.
     """
 
-    def __init__(self, engagement_id: str):
-        self.engagement_id = engagement_id
-        self.logger = get_logger(f"audit.{engagement_id}")
+    def __init__(self, assessment_id: str):
+        self.assessment_id = assessment_id
+        self.logger = get_logger(f"audit.{assessment_id}")
 
-        # Also log to engagement-specific file
+        # Also log to assessment-specific file
         import os
         ntree_home = os.getenv("NTREE_HOME", str(Path.home() / "ntree"))
-        audit_file = Path(ntree_home) / "engagements" / engagement_id / "audit.log"
+        audit_file = Path(ntree_home) / "assessments" / assessment_id / "audit.log"
 
         if not any(isinstance(h, logging.FileHandler) for h in self.logger.handlers):
             audit_file.parent.mkdir(parents=True, exist_ok=True)
