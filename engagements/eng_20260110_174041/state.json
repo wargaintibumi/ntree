@@ -1,0 +1,33 @@
+{
+  "engagement_id": "eng_20260110_174041",
+  "created": "2026-01-10T17:32:00Z",
+  "updated": "2026-01-10T17:40:41Z",
+  "phase": "COMPLETED",
+  "scope_file": "/home/itsa007/ntree/test_scope.txt",
+  "target": "192.168.0.123",
+  "engagement_dir": "/home/itsa007/ntree/engagements/eng_20260110_174041",
+  "discovered_assets": {
+    "hosts": ["192.168.0.123"],
+    "services": [
+      "192.168.0.123:21/ftp - ProFTPD 1.3.5",
+      "192.168.0.123:22/ssh - OpenSSH 6.6.1p1",
+      "192.168.0.123:80/http - Apache 2.4.7",
+      "192.168.0.123:445/smb - Samba 4.3.11",
+      "192.168.0.123:3306/mysql - MySQL",
+      "192.168.0.123:8080/http - Jetty 8.1.7"
+    ],
+    "credentials": []
+  },
+  "findings": [
+    {"id": "finding_001", "title": "ProFTPD 1.3.5 - mod_copy Vulnerability", "severity": "critical"},
+    {"id": "finding_002", "title": "SMB Message Signing Disabled", "severity": "high"},
+    {"id": "finding_003", "title": "SQL Injection Vulnerability", "severity": "critical"},
+    {"id": "finding_004", "title": "CSRF Vulnerabilities", "severity": "medium"},
+    {"id": "finding_005", "title": "Directory Listing Enabled", "severity": "medium"},
+    {"id": "finding_006", "title": "phpMyAdmin Exposed", "severity": "high"},
+    {"id": "finding_007", "title": "Outdated OpenSSH Version", "severity": "medium"},
+    {"id": "finding_008", "title": "MySQL Unauthorized Access", "severity": "high"},
+    {"id": "finding_009", "title": "Outdated Jetty Web Server", "severity": "medium"},
+    {"id": "finding_010", "title": "SMB regsvc DoS Vulnerability", "severity": "medium"}
+  ]
+}

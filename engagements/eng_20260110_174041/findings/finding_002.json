@@ -1,0 +1,13 @@
+{
+  "finding_id": "finding_002",
+  "title": "SMB Message Signing Disabled",
+  "severity": "high",
+  "description": "SMB message signing is disabled on the target. This allows attackers to perform man-in-the-middle attacks, relay authentication, and potentially gain unauthorized access to network resources.",
+  "affected_hosts": ["192.168.0.123:445"],
+  "evidence": "nmap smb-security-mode script: message_signing: disabled (dangerous, but default)",
+  "cvss_score": 7.5,
+  "remediation": "Enable SMB message signing on the Samba server by setting 'server signing = mandatory' in smb.conf",
+  "references": ["CWE-311", "https://attack.mitre.org/techniques/T1557/001/"],
+  "exploitable": true,
+  "discovered_at": "2026-01-10T17:32:00Z"
+}

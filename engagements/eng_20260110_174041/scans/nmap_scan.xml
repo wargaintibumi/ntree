@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<!-- Nmap 7.93 scan initiated Sat Jan 10 17:31:43 2026 as: nmap -sV -sC -Pn -p 1-10000 -oX /tmp/nmap_scan.xml -oN /tmp/nmap_scan.txt 192.168.0.123 -->
+<nmaprun scanner="nmap" args="nmap -sV -sC -Pn -p 1-10000 -oX /tmp/nmap_scan.xml -oN /tmp/nmap_scan.txt 192.168.0.123" start="1768041103" startstr="Sat Jan 10 17:31:43 2026" version="7.93" xmloutputversion="1.05">
+<scaninfo type="connect" protocol="tcp" numservices="10000" services="1-10000"/>
+<verbose level="0"/>
+<debugging level="0"/>
+<host starttime="1768041104" endtime="1768041139"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="192.168.0.123" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+<ports><extraports state="filtered" count="10000">
+<extrareasons reason="no-response" count="9990" proto="tcp" ports="1-20,22,24-79,81-112,114-134,136-142,144-198,200-992,994-3388,3390-8079,8081-10000"/>
+<extrareasons reason="host-unreach" count="10" proto="tcp" ports="21,23,80,113,135,143,199,993,3389,8080"/>
+</extraports>
+</ports>
+<times srtt="55648" rttvar="4205" to="100000"/>
+</host>
+<runstats><finished time="1768041139" timestr="Sat Jan 10 17:32:19 2026" summary="Nmap done at Sat Jan 10 17:32:19 2026; 1 IP address (1 host up) scanned in 35.52 seconds" elapsed="35.52" exit="success"/><hosts up="1" down="0" total="1"/>
+</runstats>
+</nmaprun>

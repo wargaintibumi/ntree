@@ -1,0 +1,50 @@
+2026-01-10 13:43:29 INFO     __main__: Initializing engagement with scope file: /home/itsa007/ntree/test_scope.txt
+2026-01-10 13:43:29 INFO     __main__: Created engagement directory: /home/itsa007/ntree/engagements/eng_20260110_134329
+2026-01-10 13:43:29 INFO     __main__: Engagement eng_20260110_134329 initialized successfully
+2026-01-10 17:23:44 INFO     __main__: Initializing engagement with scope file: /home/itsa007/ntree/test_scope.txt
+2026-01-10 17:23:44 INFO     __main__: Created engagement directory: /home/itsa007/ntree/engagements/eng_20260110_172344
+2026-01-10 17:23:44 INFO     __main__: Engagement eng_20260110_172344 initialized successfully
+2026-01-10 17:24:03 INFO     __main__: Scope check: 192.168.0.123 -> IN SCOPE
+2026-01-10 17:24:03 INFO     __main__: Starting network scan: targets=192.168.0.123, type=tcp_syn, intensity=normal
+2026-01-10 17:24:03 ERROR    __main__: Nmap scan failed: Failed to open XML output file /tmp/tmpftsn8_dc.xml for writing: Permission denied (13)
+
+2026-01-10 17:24:09 INFO     __main__: Starting network scan: targets=192.168.0.123, type=full_connect, intensity=normal
+2026-01-10 17:24:10 ERROR    __main__: Nmap scan failed: Failed to open XML output file /tmp/tmphkjo5jc7.xml for writing: Permission denied (13)
+
+2026-01-10 17:24:14 INFO     __main__: Starting network scan: targets=192.168.0.123, type=ping_sweep, intensity=normal
+2026-01-10 17:24:15 ERROR    __main__: Nmap scan failed: Failed to open XML output file /tmp/tmpn9qqbsue.xml for writing: Permission denied (13)
+
+2026-01-10 17:25:37 INFO     __main__: Initializing engagement with scope file: /home/itsa007/ntree/test_scope.txt
+2026-01-10 17:25:37 INFO     __main__: Created engagement directory: /home/itsa007/ntree/engagements/eng_20260110_172537
+2026-01-10 17:25:37 INFO     __main__: Engagement eng_20260110_172537 initialized successfully
+2026-01-10 17:25:46 INFO     __main__: Scope check: 192.168.0.123 -> IN SCOPE
+2026-01-10 17:25:52 INFO     __main__: Starting network scan: targets=192.168.0.123, type=tcp_syn, intensity=normal
+2026-01-10 17:25:52 ERROR    __main__: Nmap scan failed: Failed to open XML output file /tmp/tmpbuqlc9pp.xml for writing: Permission denied (13)
+
+2026-01-10 17:25:55 INFO     __main__: Starting network scan: targets=192.168.0.123, type=full_connect, intensity=normal
+2026-01-10 17:25:56 ERROR    __main__: Nmap scan failed: Failed to open XML output file /tmp/tmpr3b0m61q.xml for writing: Permission denied (13)
+
+2026-01-10 17:27:29 INFO     __main__: Enumerating SMB on 192.168.0.123
+2026-01-10 17:27:29 INFO     __main__: Enumerating web application: http://192.168.0.123
+2026-01-10 17:27:29 WARNING  __main__: No wordlist found for directory enumeration
+2026-01-10 17:27:29 INFO     __main__: Web enumeration complete: Found 1 technologies, 0 endpoints, 0 potential issues
+2026-01-10 17:28:36 INFO     __main__: Enumerating web application: http://192.168.0.123/drupal
+2026-01-10 17:28:36 WARNING  __main__: No wordlist found for directory enumeration
+2026-01-10 17:28:37 INFO     __main__: Web enumeration complete: Found 3 technologies, 0 endpoints, 0 potential issues
+2026-01-10 17:28:37 INFO     __main__: Enumerating web application: http://192.168.0.123/phpmyadmin
+2026-01-10 17:28:37 WARNING  __main__: No wordlist found for directory enumeration
+2026-01-10 17:28:37 INFO     __main__: Web enumeration complete: Found 3 technologies, 0 endpoints, 0 potential issues
+2026-01-10 17:28:48 INFO     __main__: Analyzing configuration for ssh on 192.168.0.123
+2026-01-10 17:28:49 INFO     __main__: Configuration analysis complete: Found 2 misconfiguration(s)
+2026-01-10 17:28:55 INFO     __main__: Searching exploits for ProFTPD 1.3.5
+2026-01-10 17:28:55 INFO     __main__: Found 0 exploit(s) for ProFTPD 1.3.5
+2026-01-10 17:28:55 INFO     __main__: Searching exploits for Drupal 
+2026-01-10 17:28:55 INFO     __main__: Found 0 exploit(s) for Drupal 
+2026-01-10 17:28:55 INFO     __main__: Analyzing configuration for smb on 192.168.0.123
+2026-01-10 17:29:04 INFO     __main__: Configuration analysis complete: Found 2 misconfiguration(s)
+2026-01-10 17:29:40 INFO     __main__: Testing vulnerability CVE-2017-0144 on 192.168.0.123:smb (safe_mode=True)
+2026-01-10 17:30:16 INFO     __main__: Vulnerability test complete: Vulnerability CVE-2017-0144: Not Vulnerable (confidence: unknown)
+2026-01-10 17:30:16 INFO     __main__: Analyzing configuration for ssl on 192.168.0.123
+2026-01-10 17:30:16 INFO     __main__: Configuration analysis complete: Found 0 misconfiguration(s)
+2026-01-10 17:30:28 INFO     __main__: Testing vulnerability CVE-2014-3566 on 192.168.0.123:http (safe_mode=True)
+2026-01-10 17:31:05 INFO     __main__: Vulnerability test complete: Vulnerability CVE-2014-3566: Not Vulnerable (confidence: unknown)

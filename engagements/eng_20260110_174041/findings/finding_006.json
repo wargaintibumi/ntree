@@ -1,0 +1,13 @@
+{
+  "finding_id": "finding_006",
+  "title": "phpMyAdmin Exposed - Database Management Interface",
+  "severity": "high",
+  "description": "phpMyAdmin is publicly accessible at /phpmyadmin/. This database management interface could be targeted for credential brute-forcing or exploitation of phpMyAdmin vulnerabilities.",
+  "affected_hosts": ["192.168.0.123:80"],
+  "evidence": "nmap http-enum detected: /phpmyadmin/: phpMyAdmin",
+  "cvss_score": 7.5,
+  "remediation": "Restrict access to phpMyAdmin using IP whitelisting. Implement strong authentication. Consider removing phpMyAdmin from production environments.",
+  "references": ["CWE-200", "OWASP-A07:2021"],
+  "exploitable": true,
+  "discovered_at": "2026-01-10T17:33:00Z"
+}

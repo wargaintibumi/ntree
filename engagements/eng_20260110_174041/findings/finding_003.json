@@ -1,0 +1,13 @@
+{
+  "finding_id": "finding_003",
+  "title": "SQL Injection Vulnerability in Web Application",
+  "severity": "critical",
+  "description": "Multiple SQL injection vulnerabilities were detected in the web application. The vulnerable parameters in directory listing sorting allow attackers to inject SQL commands, potentially leading to data exfiltration, authentication bypass, or remote code execution.",
+  "affected_hosts": ["192.168.0.123:80"],
+  "evidence": "nmap http-sql-injection script detected possible SQLi for queries:\n- http://192.168.0.123:80/?C=N%3BO%3DD%27%20OR%20sqlspider\n- http://192.168.0.123:80/?C=S%3BO%3DA%27%20OR%20sqlspider\n- http://192.168.0.123:80/?C=M%3BO%3DA%27%20OR%20sqlspider\n- http://192.168.0.123:80/?C=D%3BO%3DA%27%20OR%20sqlspider",
+  "cvss_score": 9.8,
+  "remediation": "Implement parameterized queries/prepared statements. Apply input validation and sanitization. Use web application firewall (WAF).",
+  "references": ["CWE-89", "OWASP-A03:2021"],
+  "exploitable": true,
+  "discovered_at": "2026-01-10T17:33:00Z"
+}

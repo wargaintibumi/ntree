@@ -1,0 +1,13 @@
+{
+  "finding_id": "finding_008",
+  "title": "MySQL Unauthorized Access",
+  "severity": "high",
+  "description": "MySQL server on port 3306 returned 'unauthorized' which may indicate weak authentication or misconfiguration. The database server should not be exposed directly to the network.",
+  "affected_hosts": ["192.168.0.123:3306"],
+  "evidence": "nmap -sV scan result: 3306/tcp open mysql MySQL (unauthorized)",
+  "cvss_score": 7.5,
+  "remediation": "Restrict MySQL access to localhost or trusted hosts only. Implement strong authentication. Use SSL/TLS for database connections.",
+  "references": ["CWE-306", "CIS MySQL Benchmark"],
+  "exploitable": true,
+  "discovered_at": "2026-01-10T17:32:00Z"
+}

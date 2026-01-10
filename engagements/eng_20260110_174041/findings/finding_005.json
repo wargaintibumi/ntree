@@ -1,0 +1,13 @@
+{
+  "finding_id": "finding_005",
+  "title": "Directory Listing Enabled - Information Disclosure",
+  "severity": "medium",
+  "description": "Apache web server has directory listing enabled, exposing sensitive file and directory structure. Discovered directories include /chat/, /drupal/, /payroll_app.php, /phpmyadmin/, and /uploads/. This allows attackers to enumerate application structure and find sensitive files.",
+  "affected_hosts": ["192.168.0.123:80"],
+  "evidence": "nmap http-ls script output:\n- /chat/\n- /drupal/\n- /payroll_app.php\n- /phpmyadmin/\n- /uploads/",
+  "cvss_score": 5.3,
+  "remediation": "Disable directory listing in Apache configuration by setting 'Options -Indexes' in the relevant Directory directive.",
+  "references": ["CWE-548", "OWASP-A01:2021"],
+  "exploitable": false,
+  "discovered_at": "2026-01-10T17:32:00Z"
+}

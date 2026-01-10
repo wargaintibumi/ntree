@@ -1,0 +1,8 @@
+# Nmap 7.93 scan initiated Sat Jan 10 17:31:43 2026 as: nmap -sV -sC -Pn -p 1-10000 -oX /tmp/nmap_scan.xml -oN /tmp/nmap_scan.txt 192.168.0.123
+Nmap scan report for 192.168.0.123
+Host is up (0.056s latency).
+All 10000 scanned ports on 192.168.0.123 are in ignored states.
+Not shown: 9990 filtered tcp ports (no-response), 10 filtered tcp ports (host-unreach)
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+# Nmap done at Sat Jan 10 17:32:19 2026 -- 1 IP address (1 host up) scanned in 35.52 seconds

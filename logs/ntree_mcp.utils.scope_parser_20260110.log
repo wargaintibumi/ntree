@@ -1,0 +1,3 @@
+2026-01-10 13:43:29 INFO     ntree_mcp.utils.scope_parser: Scope loaded: {'included_ranges': 0, 'included_ips': 1, 'included_domains': 0, 'excluded_ranges': 0, 'excluded_ips': 0, 'total_targets': 1}
+2026-01-10 17:23:44 INFO     ntree_mcp.utils.scope_parser: Scope loaded: {'included_ranges': 0, 'included_ips': 1, 'included_domains': 0, 'excluded_ranges': 0, 'excluded_ips': 0, 'total_targets': 1}
+2026-01-10 17:25:37 INFO     ntree_mcp.utils.scope_parser: Scope loaded: {'included_ranges': 0, 'included_ips': 1, 'included_domains': 0, 'excluded_ranges': 0, 'excluded_ips': 0, 'total_targets': 1}

@@ -1,0 +1,13 @@
+{
+  "finding_id": "finding_009",
+  "title": "Outdated Jetty Web Server",
+  "severity": "medium",
+  "description": "The target is running Jetty 8.1.7.v20120910 on port 8080. This version is significantly outdated (from 2012) and may contain multiple known vulnerabilities.",
+  "affected_hosts": ["192.168.0.123:8080"],
+  "evidence": "nmap -sV scan result: 8080/tcp open http Jetty(8.1.7.v20120910)\nhttp-server-header: Jetty(8.1.7.v20120910)",
+  "cvss_score": 5.3,
+  "remediation": "Upgrade Jetty to the latest stable version (11.x or 12.x). Review and apply security hardening guidelines.",
+  "references": ["CVE-2017-9735", "CVE-2017-7656"],
+  "exploitable": false,
+  "discovered_at": "2026-01-10T17:32:00Z"
+}

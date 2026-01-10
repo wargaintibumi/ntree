@@ -1,0 +1,13 @@
+{
+  "finding_id": "finding_007",
+  "title": "Outdated OpenSSH Version",
+  "severity": "medium",
+  "description": "The target is running OpenSSH 6.6.1p1 Ubuntu 2ubuntu2.13. This version is outdated and may be vulnerable to various security issues including username enumeration (CVE-2016-6210) and other known vulnerabilities.",
+  "affected_hosts": ["192.168.0.123:22"],
+  "evidence": "nmap -sV scan result: 22/tcp open ssh OpenSSH 6.6.1p1 Ubuntu 2ubuntu2.13",
+  "cvss_score": 5.3,
+  "remediation": "Upgrade OpenSSH to the latest stable version. Implement key-based authentication and disable password authentication if possible.",
+  "references": ["CVE-2016-6210", "CVE-2015-5600"],
+  "exploitable": false,
+  "discovered_at": "2026-01-10T17:32:00Z"
+}

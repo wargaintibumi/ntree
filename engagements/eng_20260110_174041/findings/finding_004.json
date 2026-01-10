@@ -1,0 +1,13 @@
+{
+  "finding_id": "finding_004",
+  "title": "Cross-Site Request Forgery (CSRF) Vulnerabilities",
+  "severity": "medium",
+  "description": "Multiple forms on the web application lack proper CSRF protection, including the Drupal login form, payroll application, and chat application. Attackers can craft malicious pages that perform actions on behalf of authenticated users.",
+  "affected_hosts": ["192.168.0.123:80"],
+  "evidence": "nmap http-csrf script found CSRF vulnerabilities in:\n- /drupal/ user-login-form\n- /payroll_app.php\n- /chat/ index.php\n- /drupal/?q=user/register\n- /drupal/?q=user/password",
+  "cvss_score": 6.5,
+  "remediation": "Implement anti-CSRF tokens in all forms. Use SameSite cookie attribute. Validate Origin and Referer headers.",
+  "references": ["CWE-352", "OWASP-A01:2021"],
+  "exploitable": true,
+  "discovered_at": "2026-01-10T17:33:00Z"
+}

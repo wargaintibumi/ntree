@@ -1,0 +1,7 @@
+2026-01-10 17:27:29 ERROR    ntree_mcp.utils.command_runner: Command execution error: [Errno 2] No such file or directory: 'enum4linux'
+2026-01-10 17:27:29 ERROR    ntree_mcp.utils.command_runner: Command execution error: [Errno 2] No such file or directory: 'nikto'
+2026-01-10 17:28:36 ERROR    ntree_mcp.utils.command_runner: Command execution error: [Errno 2] No such file or directory: 'nikto'
+2026-01-10 17:28:37 ERROR    ntree_mcp.utils.command_runner: Command execution error: [Errno 2] No such file or directory: 'nikto'
+2026-01-10 17:28:55 ERROR    ntree_mcp.utils.command_runner: Command execution error: [Errno 2] No such file or directory: 'searchsploit'
+2026-01-10 17:28:55 ERROR    ntree_mcp.utils.command_runner: Command execution error: [Errno 2] No such file or directory: 'searchsploit'
+2026-01-10 17:30:16 ERROR    ntree_mcp.utils.command_runner: Command execution error: [Errno 2] No such file or directory: 'testssl.sh'

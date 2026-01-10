@@ -1,0 +1,13 @@
+{
+  "finding_id": "finding_010",
+  "title": "SMB regsvc Denial of Service Vulnerability",
+  "severity": "medium",
+  "description": "The SMB service is vulnerable to denial of service attack via the regsvc service null dereference pointer vulnerability.",
+  "affected_hosts": ["192.168.0.123:445"],
+  "evidence": "nmap smb-vuln-regsvc-dos script result: VULNERABLE - Service regsvc in Microsoft Windows systems vulnerable to denial of service",
+  "cvss_score": 5.0,
+  "remediation": "Apply security patches. Consider disabling unnecessary SMB features.",
+  "references": ["CVE-2006-6604"],
+  "exploitable": true,
+  "discovered_at": "2026-01-10T17:33:00Z"
+}

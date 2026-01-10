@@ -1,0 +1,78 @@
+Starting Nmap 7.93 ( https://nmap.org ) at 2026-01-10 17:33 WIB
+Pre-scan script results:
+| broadcast-avahi-dos: 
+|   Discovered hosts:
+|     224.0.0.251
+|   After NULL UDP avahi packet DoS (CVE-2011-1002).
+|_  Hosts are all up (not vulnerable).
+Nmap scan report for 192.168.0.123
+Host is up (0.072s latency).
+
+PORT     STATE SERVICE
+21/tcp   open  ftp
+22/tcp   open  ssh
+80/tcp   open  http
+| http-enum: 
+|   /: Root directory w/ listing on 'apache/2.4.7 (ubuntu)'
+|   /phpmyadmin/: phpMyAdmin
+|_  /uploads/: Potentially interesting directory w/ listing on 'apache/2.4.7 (ubuntu)'
+|_http-dombased-xss: Couldn't find any DOM based XSS.
+| http-csrf: 
+| Spidering limited to: maxdepth=3; maxpagecount=20; withinhost=192.168.0.123
+|   Found the following possible CSRF vulnerabilities: 
+|     
+|     Path: http://192.168.0.123:80/drupal/
+|     Form id: user-login-form
+|     Form action: /drupal/?q=node&destination=node
+|     
+|     Path: http://192.168.0.123:80/payroll_app.php
+|     Form id: 
+|     Form action: 
+|     
+|     Path: http://192.168.0.123:80/chat/
+|     Form id: name
+|     Form action: index.php
+|     
+|     Path: http://192.168.0.123:80/drupal/?q=user/register
+|     Form id: user-register-form
+|     Form action: /drupal/?q=user/register
+|     
+|     Path: http://192.168.0.123:80/drupal/?q=node&amp;destination=node
+|     Form id: user-login-form
+|     Form action: /drupal/?q=node&destination=node%3Famp%253Bdestination%3Dnode
+|     
+|     Path: http://192.168.0.123:80/drupal/?q=node/2
+|     Form id: user-login-form
+|     Form action: /drupal/?q=node/2&destination=node/2
+|     
+|     Path: http://192.168.0.123:80/drupal/?q=node/1
+|     Form id: user-login-form
+|     Form action: /drupal/?q=node/1&destination=node/1
+|     
+|     Path: http://192.168.0.123:80/drupal/?q=user/password
+|     Form id: user-pass
+|_    Form action: /drupal/?q=user/password
+| http-sql-injection: 
+|   Possible sqli for queries:
+|     http://192.168.0.123:80/?C=N%3BO%3DD%27%20OR%20sqlspider
+|     http://192.168.0.123:80/?C=S%3BO%3DA%27%20OR%20sqlspider
+|     http://192.168.0.123:80/?C=M%3BO%3DA%27%20OR%20sqlspider
+|_    http://192.168.0.123:80/?C=D%3BO%3DA%27%20OR%20sqlspider
+|_http-stored-xss: Couldn't find any stored XSS vulnerabilities.
+445/tcp  open  microsoft-ds
+3306/tcp open  mysql
+8080/tcp open  http-proxy
+
+Host script results:
+|_smb-vuln-ms10-061: false
+|_smb-vuln-ms10-054: false
+| smb-vuln-regsvc-dos: 
+|   VULNERABLE:
+|   Service regsvc in Microsoft Windows systems vulnerable to denial of service
+|     State: VULNERABLE
+|       The service regsvc in Microsoft Windows 2000 systems is vulnerable to denial of service caused by a null deference
+|       pointer. This script will crash the service if it is vulnerable. This vulnerability was discovered by Ron Bowes
+|       while working on smb-enum-sessions.
+|_          
+
+Nmap done: 1 IP address (1 host up) scanned in 391.15 seconds

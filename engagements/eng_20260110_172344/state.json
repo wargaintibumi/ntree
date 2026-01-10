@@ -1,0 +1,16 @@
+{
+  "engagement_id": "eng_20260110_172344",
+  "created": "2026-01-10T17:23:44.448355",
+  "updated": "2026-01-10T17:23:44.448371",
+  "phase": "INITIALIZATION",
+  "scope_file": "/home/itsa007/ntree/test_scope.txt",
+  "roe_file": "",
+  "engagement_dir": "/home/itsa007/ntree/engagements/eng_20260110_172344",
+  "discovered_assets": {
+    "hosts": [],
+    "services": [],
+    "credentials": []
+  },
+  "findings": [],
+  "action_history": []
+}

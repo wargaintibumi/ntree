@@ -1,0 +1,8 @@
+# NTREE Scope File
+# Generated: Sat Jan 10 08:25:05 PM WIB 2026
+# Engagement: metasploitable3
+
+# Included Targets
+192.168.0.123
+
+# Excluded Targets
