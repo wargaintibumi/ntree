@@ -226,27 +226,50 @@ install_python_tools() {
 
 # Install wordlists
 install_wordlists() {
-    log_info "Installing wordlists..."
+    log_info "Installing wordlists (SecLists and RockYou)..."
 
     mkdir -p ~/wordlists
 
-    # Install SecLists
+    # Install SecLists - Required for NTREE wordlist functionality
     if [[ -d ~/wordlists/SecLists ]]; then
         log_warning "SecLists already installed, updating..."
         cd ~/wordlists/SecLists && git pull
         cd -
     else
-        log_info "Cloning SecLists (this may take 5-10 minutes)..."
+        log_info "Cloning SecLists from danielmiessler (this may take 5-10 minutes)..."
+        log_info "Repository: https://github.com/danielmiessler/SecLists.git"
         git clone --depth 1 https://github.com/danielmiessler/SecLists.git ~/wordlists/SecLists
+
+        if [[ $? -eq 0 ]]; then
+            log_success "SecLists cloned successfully"
+            log_info "SecLists location: ~/wordlists/SecLists"
+        else
+            log_error "Failed to clone SecLists. NTREE wordlist features will not work."
+            log_info "You can manually install later: git clone https://github.com/danielmiessler/SecLists.git ~/wordlists/SecLists"
+        fi
     fi
 
     # Download rockyou if not exists
     if [[ ! -f ~/wordlists/rockyou.txt ]]; then
         log_info "Downloading rockyou wordlist..."
         wget -q https://github.com/brannondorsey/naive-hashcat/releases/download/data/rockyou.txt -O ~/wordlists/rockyou.txt
+
+        if [[ $? -eq 0 ]]; then
+            log_success "RockYou wordlist downloaded"
+        else
+            log_warning "Failed to download rockyou wordlist"
+        fi
+    fi
+
+    # Add environment variable for wordlists path
+    if ! grep -q "NTREE_WORDLISTS_PATH" ~/.bashrc; then
+        echo 'export NTREE_WORDLISTS_PATH="$HOME/wordlists"' >> ~/.bashrc
+        echo 'export SECLISTS_PATH="$HOME/wordlists/SecLists"' >> ~/.bashrc
     fi
 
     log_success "Wordlists installed"
+    log_info "SecLists path: ~/wordlists/SecLists"
+    log_info "Environment variables added to ~/.bashrc"
 }
 
 # Set up NTREE directory structure
@@ -348,9 +371,14 @@ export PATH="$HOME/tools/testssl:$PATH"
 # Set NTREE home
 export NTREE_HOME="$HOME/ntree"
 
+# Set wordlist paths
+export NTREE_WORDLISTS_PATH="$HOME/wordlists"
+export SECLISTS_PATH="$HOME/wordlists/SecLists"
+
 echo "NTREE environment activated"
 echo "Python venv: $(which python)"
 echo "NTREE_HOME: $NTREE_HOME"
+echo "SecLists: $SECLISTS_PATH"
 EOF
 
     chmod +x ~/ntree/activate.sh
@@ -449,6 +477,12 @@ show_next_steps() {
     log_info "NTREE Directory: ${GREEN}~/ntree${NC}"
     log_info "Templates: ${GREEN}~/ntree/templates/${NC}"
     log_info "Engagements: ${GREEN}~/ntree/engagements/${NC}"
+    log_info "Wordlists (SecLists): ${GREEN}~/wordlists/SecLists${NC}"
+    echo ""
+    log_info "Wordlist Capabilities:"
+    echo "   - Search SecLists by keyword: ${YELLOW}search_wordlists${NC}"
+    echo "   - Access passwords, usernames, subdomains, fuzzing lists"
+    echo "   - ${GREEN}~/wordlists/SecLists${NC} contains 1000+ curated wordlists"
     echo ""
     log_warning "Reload your shell or run: ${GREEN}source ~/.bashrc${NC}"
     echo ""

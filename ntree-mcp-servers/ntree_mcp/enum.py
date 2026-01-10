@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from .utils.command_runner import run_command
 from .utils.nmap_parser import parse_nmap_xml
 from .utils.logger import get_logger
+from .utils.wordlist import get_wordlist_manager
 
 logger = get_logger(__name__)
 
@@ -51,6 +52,24 @@ class EnumerateDomainArgs(BaseModel):
     password: str = Field(default="", description="Optional password for authenticated enumeration")
 
 
+class SearchWordlistsArgs(BaseModel):
+    """Arguments for search_wordlists tool."""
+    keyword: str = Field(description="Search keyword (e.g., 'password', 'username', 'subdomain')")
+    category: str = Field(default="", description="Optional category filter (e.g., 'Passwords', 'Discovery')")
+    max_results: int = Field(default=20, description="Maximum number of results (default: 20)")
+
+
+class GetWordlistArgs(BaseModel):
+    """Arguments for get_wordlist tool."""
+    relative_path: str = Field(description="Relative path to wordlist within SecLists")
+    max_lines: int = Field(default=100, description="Maximum lines to preview (default: 100)")
+
+
+class ListWordlistCategoriesArgs(BaseModel):
+    """Arguments for list_wordlist_categories tool."""
+    pass  # No arguments needed
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available enumeration tools."""
@@ -74,6 +93,21 @@ async def list_tools() -> list[Tool]:
             name="enumerate_domain",
             description="Enumerate Active Directory domain controller for users, groups, computers, and policies",
             inputSchema=EnumerateDomainArgs.model_json_schema()
+        ),
+        Tool(
+            name="search_wordlists",
+            description="Search SecLists wordlists by keyword and category for use in password/username/subdomain enumeration",
+            inputSchema=SearchWordlistsArgs.model_json_schema()
+        ),
+        Tool(
+            name="get_wordlist",
+            description="Get full path and preview content of a specific wordlist from SecLists",
+            inputSchema=GetWordlistArgs.model_json_schema()
+        ),
+        Tool(
+            name="list_wordlist_categories",
+            description="List all available SecLists categories (Passwords, Usernames, Discovery, Fuzzing, etc.)",
+            inputSchema=ListWordlistCategoriesArgs.model_json_schema()
         ),
     ]
 
@@ -104,6 +138,24 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 args.username,
                 args.password
             )
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "search_wordlists":
+            args = SearchWordlistsArgs(**arguments)
+            result = await search_wordlists(
+                args.keyword,
+                args.category if args.category else None,
+                args.max_results
+            )
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "get_wordlist":
+            args = GetWordlistArgs(**arguments)
+            result = await get_wordlist(args.relative_path, args.max_lines)
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "list_wordlist_categories":
+            result = await list_wordlist_categories()
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         else:
@@ -690,6 +742,191 @@ async def enumerate_domain(
 
     except Exception as e:
         logger.error(f"Error enumerating AD on {domain_controller}: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+async def search_wordlists(
+    keyword: str,
+    category: Optional[str] = None,
+    max_results: int = 20
+) -> dict:
+    """
+    Search SecLists wordlists by keyword.
+
+    Args:
+        keyword: Search keyword
+        category: Optional category filter
+        max_results: Maximum number of results
+
+    Returns:
+        {
+            "status": "success",
+            "keyword": "password",
+            "category": "Passwords",
+            "results": [...],
+            "total_results": 15,
+            "seclists_available": True
+        }
+    """
+    try:
+        logger.info(f"Searching wordlists: keyword={keyword}, category={category}")
+
+        wordlist_mgr = get_wordlist_manager()
+
+        if not wordlist_mgr.is_available():
+            return {
+                "status": "error",
+                "error": "SecLists not found. Please install: git clone https://github.com/danielmiessler/SecLists.git ~/wordlists/SecLists",
+                "seclists_available": False
+            }
+
+        results = wordlist_mgr.search_wordlists(keyword, category, max_results)
+
+        logger.info(f"Found {len(results)} wordlists matching '{keyword}'")
+
+        return {
+            "status": "success",
+            "keyword": keyword,
+            "category": category if category else "all",
+            "results": results,
+            "total_results": len(results),
+            "seclists_available": True,
+            "summary": f"Found {len(results)} wordlists matching '{keyword}'"
+        }
+
+    except Exception as e:
+        logger.error(f"Error searching wordlists: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+async def get_wordlist(relative_path: str, max_lines: int = 100) -> dict:
+    """
+    Get full path and preview content of a wordlist.
+
+    Args:
+        relative_path: Relative path within SecLists
+        max_lines: Maximum lines to preview
+
+    Returns:
+        {
+            "status": "success",
+            "name": "10k-most-common.txt",
+            "path": "/home/user/wordlists/SecLists/Passwords/Common-Credentials/10k-most-common.txt",
+            "relative_path": "Passwords/Common-Credentials/10k-most-common.txt",
+            "size": "123 KB",
+            "lines_previewed": 100,
+            "preview": ["password", "123456", ...],
+            "total_lines": 10000
+        }
+    """
+    try:
+        logger.info(f"Getting wordlist: {relative_path}")
+
+        wordlist_mgr = get_wordlist_manager()
+
+        if not wordlist_mgr.is_available():
+            return {
+                "status": "error",
+                "error": "SecLists not found",
+                "seclists_available": False
+            }
+
+        # Get full path
+        full_path = wordlist_mgr.get_wordlist_path(relative_path)
+
+        if not full_path:
+            return {
+                "status": "error",
+                "error": f"Wordlist not found: {relative_path}"
+            }
+
+        # Read preview
+        preview = wordlist_mgr.read_wordlist(full_path, max_lines=max_lines)
+
+        # Count total lines
+        try:
+            with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                total_lines = sum(1 for _ in f)
+        except:
+            total_lines = len(preview)
+
+        # Get file info
+        from pathlib import Path
+        file_path = Path(full_path)
+        file_size = file_path.stat().st_size
+
+        logger.info(f"Wordlist loaded: {file_path.name} ({total_lines} lines)")
+
+        return {
+            "status": "success",
+            "name": file_path.name,
+            "path": str(full_path),
+            "relative_path": relative_path,
+            "size": wordlist_mgr._format_size(file_size),
+            "size_bytes": file_size,
+            "lines_previewed": len(preview),
+            "preview": preview[:max_lines],  # Ensure we don't exceed max_lines
+            "total_lines": total_lines,
+            "summary": f"Wordlist: {file_path.name} ({total_lines} lines, {wordlist_mgr._format_size(file_size)})"
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting wordlist: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+async def list_wordlist_categories() -> dict:
+    """
+    List all available SecLists categories.
+
+    Returns:
+        {
+            "status": "success",
+            "categories": ["Discovery", "Fuzzing", "Passwords", ...],
+            "total_categories": 15,
+            "seclists_path": "/home/user/wordlists/SecLists"
+        }
+    """
+    try:
+        logger.info("Listing wordlist categories")
+
+        wordlist_mgr = get_wordlist_manager()
+
+        if not wordlist_mgr.is_available():
+            return {
+                "status": "error",
+                "error": "SecLists not found",
+                "seclists_available": False
+            }
+
+        categories = wordlist_mgr.list_categories()
+
+        # Get common wordlists for quick reference
+        common = wordlist_mgr.get_common_wordlists()
+
+        logger.info(f"Found {len(categories)} wordlist categories")
+
+        return {
+            "status": "success",
+            "categories": categories,
+            "total_categories": len(categories),
+            "seclists_path": str(wordlist_mgr.seclists_path),
+            "seclists_available": True,
+            "common_wordlists": common,
+            "summary": f"Found {len(categories)} categories with commonly used wordlists"
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing categories: {e}", exc_info=True)
         return {
             "status": "error",
             "error": str(e)

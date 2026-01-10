@@ -71,6 +71,8 @@ python ntree-autonomous/ntree_agent_sdk.py --scope ~/scope.txt
 |----------|---------|---------|
 | `NTREE_HOME` | Base directory for NTREE files | `~/ntree` |
 | `ANTHROPIC_API_KEY` | API key for autonomous mode | Required for autonomous |
+| `SECLISTS_PATH` | Path to SecLists wordlists | `~/wordlists/SecLists` |
+| `NTREE_WORDLISTS_PATH` | Base wordlist directory | `~/wordlists` |
 
 ## Architecture
 
@@ -86,7 +88,7 @@ python ntree-autonomous/ntree_agent_sdk.py --scope ~/scope.txt
 |--------|---------|
 | `scope.py` | Scope validation, engagement init, **save_finding**, **update_state** |
 | `scan.py` | Network discovery, nmap, passive recon |
-| `enum.py` | Service enumeration (web, SMB, LDAP, etc.) |
+| `enum.py` | Service enumeration (web, SMB, LDAP, etc.), **wordlist search** |
 | `vuln.py` | CVE testing, credential checking, exploit research |
 | `post.py` | Post-exploitation, lateral movement |
 | `report.py` | Risk scoring, report generation |
@@ -165,6 +167,76 @@ except Exception as e:
     logger.error(f"Operation failed: {e}", exc_info=True)
     return {"status": "error", "error": str(e)}
 ```
+
+## Wordlist Integration (SecLists)
+
+NTREE includes comprehensive wordlist search and management capabilities powered by **SecLists by danielmiessler** (https://github.com/danielmiessler/SecLists.git).
+
+### Installation
+
+SecLists is automatically installed during NTREE setup to `~/wordlists/SecLists`. If not present, install manually:
+```bash
+git clone --depth 1 https://github.com/danielmiessler/SecLists.git ~/wordlists/SecLists
+```
+
+### Available MCP Tools (via enum server)
+
+| Tool | Purpose |
+|------|---------|
+| `search_wordlists` | Search SecLists by keyword (e.g., "password", "username", "subdomain") |
+| `get_wordlist` | Get full path and preview content of a specific wordlist |
+| `list_wordlist_categories` | List all available SecLists categories |
+
+### Usage Examples
+
+```python
+# Search for password wordlists
+result = await search_wordlists(keyword="password", category="Passwords", max_results=10)
+# Returns: list of matching wordlists with paths, sizes, categories
+
+# Get a specific wordlist for use
+result = await get_wordlist(relative_path="Passwords/Common-Credentials/10-million-password-list-top-100.txt")
+# Returns: full path, preview of contents, line count, file size
+
+# List all categories
+result = await list_wordlist_categories()
+# Returns: ["Discovery", "Fuzzing", "Passwords", "Usernames", "Web-Content", ...]
+```
+
+### Common Wordlist Categories
+
+- **Passwords**: Common passwords, default credentials, leaked databases
+- **Usernames**: Common usernames, default users
+- **Discovery/DNS**: Subdomains, DNS names
+- **Discovery/Web-Content**: Directories, files, parameters
+- **Fuzzing**: XSS, SQLi, command injection payloads
+- **Miscellaneous**: Various enumeration lists
+
+### Wordlist Workflow Example
+
+```python
+# 1. Search for username wordlists
+usernames = await search_wordlists(keyword="username", category="Usernames", max_results=5)
+
+# 2. Get the wordlist path
+wordlist_info = await get_wordlist(relative_path=usernames['results'][0]['relative_path'])
+wordlist_path = wordlist_info['path']  # e.g., /home/user/wordlists/SecLists/Usernames/xato-net-10-million-usernames.txt
+
+# 3. Use wordlist with security tool
+result = await run_command(f"hydra -L {wordlist_path} -P {password_list} ssh://{target}")
+```
+
+### Location and Paths
+
+- **Default Location**: `~/wordlists/SecLists`
+- **Environment Variable**: `$SECLISTS_PATH`
+- **Utility Module**: `ntree_mcp/utils/wordlist.py`
+- **Manager Class**: `WordlistManager`
+
+The WordlistManager automatically detects SecLists in standard locations:
+1. `~/wordlists/SecLists`
+2. `/usr/share/seclists`
+3. `/opt/SecLists`
 
 ## Safety Controls
 
