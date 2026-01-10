@@ -20,12 +20,39 @@ NTREE transforms Claude Code into a systematic red-team operator that conducts p
 ✅ **Three Operational Modes** - Interactive (MCP), Autonomous API, Autonomous SDK
 ✅ **Systematic Methodology** - Follows structured pentest lifecycle from recon to reporting
 ✅ **Safety-First Design** - Scope validation, approval workflows, rate limiting
-✅ **Tool Integration** - Leverages industry-standard tools (nmap, metasploit, impacket)
+✅ **Real Tool Execution** - Actually runs nmap, nikto, enum4linux, crackmapexec, nuclei
 ✅ **State Persistence** - Resume engagements across sessions
-✅ **Comprehensive Reports** - Executive and technical reports with evidence
+✅ **Real Reports** - Generated from actual findings discovered during scans
 ✅ **Affordable Hardware** - Runs on Raspberry Pi 5 ($80)
 ✅ **Fully Autonomous** - Can run scheduled pentests without human intervention
 ✅ **Powered by Claude** - Advanced reasoning + security expertise
+
+### How It Actually Works
+
+NTREE executes **real security tools** via subprocess and generates **real reports** from actual findings:
+
+```
+./start_pentest.sh --scope targets.txt
+        ↓
+init_engagement()     → Creates engagement directory
+        ↓
+scan_network()        → Runs: sudo nmap -sS -sV -O <targets>
+        ↓
+enumerate_services()  → Runs: nmap -sC -sV, nikto, enum4linux
+        ↓
+test_vuln()           → Runs: nmap --script vuln, nuclei
+        ↓
+save_finding()        → Saves vulnerability to findings/*.json
+        ↓
+generate_report()     → Reads findings, creates executive/technical report
+```
+
+**Required Security Tools:**
+```bash
+sudo apt install nmap nikto enum4linux gobuster whois dnsutils
+pip install crackmapexec
+# Optional: hydra, testssl.sh, nuclei, metasploit
+```
 
 ---
 
@@ -122,20 +149,33 @@ tar -xzf ntree-*.tar.gz && cd ntree-*
 bash install_ntree_complete.sh
 ```
 
+### Fastest Way to Start (Using Launcher Script)
+
+The easiest way to run NTREE is using the `start_pentest.sh` launcher:
+
+```bash
+# Interactive scope definition (guided setup)
+./start_pentest.sh
+
+# Or use a template and edit it
+cp templates/scope_single_target.txt my_targets.txt
+nano my_targets.txt
+./start_pentest.sh --scope my_targets.txt
+
+# View all options and examples
+./start_pentest.sh --help
+```
+
 ### Mode 1: Interactive with Claude Code (Recommended for Learning)
 
 ```bash
-# 1. Authenticate
+# Using launcher script
+./start_pentest.sh --mode interactive
+
+# Or manually:
 claude auth login
-
-# 2. Create scope file
-nano ~/ntree/templates/my_scope.txt
-
-# 3. Start Claude Code
 claude
-
-# 4. In Claude Code:
-Start NTREE with scope: ~/ntree/templates/my_scope.txt
+# Then in Claude Code: "Start NTREE with scope: ~/ntree/templates/my_scope.txt"
 ```
 
 NTREE will interactively walk you through the pentest, asking for approval at key points.
@@ -143,29 +183,40 @@ NTREE will interactively walk you through the pentest, asking for approval at ke
 ### Mode 2: Autonomous API Mode (Recommended for Automation)
 
 ```bash
-# 1. Get API key from https://console.anthropic.com/
-# 2. Configure
-nano ~/ntree/config.json  # Set anthropic.api_key
+# Set your API key
+export ANTHROPIC_API_KEY='sk-ant-...'
 
-# 3. Run single pentest
-python ~/ntree/ntree-autonomous/ntree_agent.py --scope ~/ntree/templates/my_scope.txt
+# Using launcher script
+./start_pentest.sh --scope templates/scope_internal_network.txt --mode api
 
-# 4. Or enable scheduled automation
-nano ~/ntree/config.json  # Set automation.enabled=true
-sudo systemctl enable ntree-scheduler
-sudo systemctl start ntree-scheduler
+# Or run directly:
+python ntree-autonomous/ntree_agent.py --scope ~/scope.txt
 ```
 
 **Best for:** Weekly/monthly recurring tests, production environments
 
-### Mode 3: Autonomous SDK Mode (Advanced)
+### Mode 3: Autonomous SDK Mode (No API Key Needed)
 
 ```bash
-# Same setup as API mode, but use:
-python ~/ntree/ntree-autonomous/ntree_agent_sdk.py --scope ~/ntree/templates/my_scope.txt
+# Authenticate with Claude Code first
+claude auth login
+
+# Using launcher script
+./start_pentest.sh --scope templates/scope_ctf_lab.txt --mode sdk
+
+# Or run directly:
+python ntree-autonomous/ntree_agent_sdk.py --scope ~/scope.txt
 ```
 
 **Best for:** Advanced workflows, better MCP integration, Claude Code-like behavior
+
+### Authentication Requirements
+
+| Mode | Authentication |
+|------|----------------|
+| `api` | `ANTHROPIC_API_KEY` environment variable |
+| `sdk` | `claude auth login` (Claude Code auth) |
+| `interactive` | `claude auth login` (Claude Code auth) |
 
 ### What NTREE Does Automatically
 
@@ -176,6 +227,48 @@ python ~/ntree/ntree-autonomous/ntree_agent_sdk.py --scope ~/ntree/templates/my_
 5. ✅ Generate reports
 
 **See [QUICK_DEPLOY_REFERENCE.md](QUICK_DEPLOY_REFERENCE.md) for detailed walkthrough.**
+
+---
+
+## 📁 Scope Templates
+
+NTREE includes ready-to-use scope templates in the `templates/` directory:
+
+| Template | Use Case |
+|----------|----------|
+| `scope_example.txt` | Main template with full syntax reference |
+| `scope_single_target.txt` | Quick single host/application test |
+| `scope_internal_network.txt` | Corporate LAN assessment |
+| `scope_external.txt` | Internet-facing assets |
+| `scope_active_directory.txt` | Windows AD environment |
+| `scope_webapp.txt` | Web application testing |
+| `scope_ctf_lab.txt` | HackTheBox/TryHackMe/Lab |
+| `roe_example.txt` | Rules of Engagement template |
+
+### Scope File Syntax
+
+```bash
+# Comments start with #
+192.168.1.100              # Single IP address
+192.168.1.0/24             # CIDR range (network block)
+example.com                # Domain name
+*.example.com              # Wildcard (all subdomains)
+EXCLUDE 192.168.1.1        # Exclude from testing
+```
+
+### Quick Examples
+
+```bash
+# Lab/CTF testing
+./start_pentest.sh --scope templates/scope_ctf_lab.txt --mode sdk
+
+# Corporate pentest with ROE
+./start_pentest.sh --scope templates/scope_internal_network.txt \
+                   --roe templates/roe_example.txt
+
+# Automated overnight scan
+./start_pentest.sh --scope my_targets.txt --iterations 200 --yes
+```
 
 ---
 

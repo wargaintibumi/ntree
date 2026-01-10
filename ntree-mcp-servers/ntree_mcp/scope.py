@@ -38,6 +38,27 @@ class VerifyScopeArgs(BaseModel):
     target: str = Field(description="IP address or domain to verify against scope")
 
 
+class SaveFindingArgs(BaseModel):
+    """Arguments for save_finding tool."""
+    title: str = Field(description="Finding title (e.g., 'SMB Signing Disabled')")
+    severity: str = Field(description="Severity: critical, high, medium, low, or informational")
+    description: str = Field(description="Detailed description of the finding")
+    affected_hosts: list = Field(description="List of affected IP addresses or hostnames")
+    evidence: str = Field(default="", description="Evidence/proof (command output, screenshots path, etc.)")
+    cvss_score: float = Field(default=0.0, description="CVSS score (0.0-10.0)")
+    remediation: str = Field(default="", description="Recommended remediation steps")
+    references: list = Field(default=[], description="CVE IDs, URLs, or other references")
+    exploitable: bool = Field(default=False, description="Whether vulnerability was confirmed exploitable")
+
+
+class UpdateStateArgs(BaseModel):
+    """Arguments for update_state tool."""
+    phase: str = Field(default="", description="Current phase (RECON, ENUM, VULN, EXPLOIT, POST, REPORT)")
+    hosts: list = Field(default=[], description="Discovered hosts to add")
+    services: list = Field(default=[], description="Discovered services to add")
+    credentials: list = Field(default=[], description="Discovered credentials to add (username:service:access_level)")
+
+
 @app.list_tools()
 async def list_tools() -> list[Tool]:
     """List available MCP tools."""
@@ -51,6 +72,16 @@ async def list_tools() -> list[Tool]:
             name="verify_scope",
             description="Verify if a target (IP or domain) is within the authorized scope. Returns true/false with reason.",
             inputSchema=VerifyScopeArgs.model_json_schema()
+        ),
+        Tool(
+            name="save_finding",
+            description="Save a security finding discovered during the pentest. Findings are used to generate reports.",
+            inputSchema=SaveFindingArgs.model_json_schema()
+        ),
+        Tool(
+            name="update_state",
+            description="Update engagement state with discovered assets (hosts, services, credentials) and current phase.",
+            inputSchema=UpdateStateArgs.model_json_schema()
         ),
     ]
 
@@ -67,6 +98,31 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
         elif name == "verify_scope":
             args = VerifyScopeArgs(**arguments)
             result = await verify_scope(args.target)
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "save_finding":
+            args = SaveFindingArgs(**arguments)
+            result = await save_finding(
+                args.title,
+                args.severity,
+                args.description,
+                args.affected_hosts,
+                args.evidence,
+                args.cvss_score,
+                args.remediation,
+                args.references,
+                args.exploitable
+            )
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "update_state":
+            args = UpdateStateArgs(**arguments)
+            result = await update_state(
+                args.phase,
+                args.hosts,
+                args.services,
+                args.credentials
+            )
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         else:
@@ -239,6 +295,220 @@ async def verify_scope(target: str) -> dict:
             "in_scope": False,
             "reason": f"Error during scope validation: {str(e)}",
             "target": target
+        }
+
+
+async def save_finding(
+    title: str,
+    severity: str,
+    description: str,
+    affected_hosts: list,
+    evidence: str = "",
+    cvss_score: float = 0.0,
+    remediation: str = "",
+    references: list = None,
+    exploitable: bool = False
+) -> dict:
+    """
+    Save a security finding to the engagement directory.
+
+    Args:
+        title: Finding title
+        severity: Severity level
+        description: Detailed description
+        affected_hosts: List of affected hosts
+        evidence: Evidence/proof
+        cvss_score: CVSS score
+        remediation: Remediation steps
+        references: CVE IDs, URLs
+        exploitable: Whether confirmed exploitable
+
+    Returns:
+        {
+            "status": "success",
+            "finding_id": "finding_001",
+            "finding_path": "/path/to/finding.json"
+        }
+    """
+    global _current_engagement_id
+
+    if not _current_engagement_id:
+        return {
+            "status": "error",
+            "error": "Engagement not initialized. Call init_engagement first."
+        }
+
+    try:
+        # Get engagement directory
+        ntree_home = Path(os.getenv("NTREE_HOME", str(Path.home() / "ntree")))
+        engagement_dir = ntree_home / "engagements" / _current_engagement_id
+        findings_dir = engagement_dir / "findings"
+
+        # Generate finding ID
+        existing_findings = list(findings_dir.glob("finding_*.json"))
+        finding_num = len(existing_findings) + 1
+        finding_id = f"finding_{finding_num:03d}"
+
+        # Create finding object
+        finding = {
+            "finding_id": finding_id,
+            "title": title,
+            "severity": severity.lower(),
+            "description": description,
+            "affected_hosts": affected_hosts,
+            "evidence": evidence,
+            "cvss_score": cvss_score,
+            "remediation": remediation,
+            "references": references or [],
+            "exploitable": exploitable,
+            "discovered_at": datetime.now().isoformat(),
+            "engagement_id": _current_engagement_id
+        }
+
+        # Save finding to file
+        finding_path = findings_dir / f"{finding_id}.json"
+        finding_path.write_text(json.dumps(finding, indent=2))
+
+        # Update state file with finding reference
+        state_file = engagement_dir / "state.json"
+        if state_file.exists():
+            state = json.loads(state_file.read_text())
+            if "findings" not in state:
+                state["findings"] = []
+            state["findings"].append({
+                "id": finding_id,
+                "title": title,
+                "severity": severity
+            })
+            state["updated"] = datetime.now().isoformat()
+            state_file.write_text(json.dumps(state, indent=2))
+
+        logger.info(f"Saved finding: {finding_id} - {title} ({severity})")
+
+        return {
+            "status": "success",
+            "finding_id": finding_id,
+            "finding_path": str(finding_path),
+            "severity": severity,
+            "title": title
+        }
+
+    except Exception as e:
+        logger.error(f"Error saving finding: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+async def update_state(
+    phase: str = "",
+    hosts: list = None,
+    services: list = None,
+    credentials: list = None
+) -> dict:
+    """
+    Update engagement state with discovered assets.
+
+    Args:
+        phase: Current phase
+        hosts: Discovered hosts to add
+        services: Discovered services to add
+        credentials: Discovered credentials to add
+
+    Returns:
+        {
+            "status": "success",
+            "phase": "ENUM",
+            "total_hosts": 12,
+            "total_services": 45,
+            "total_credentials": 3
+        }
+    """
+    global _current_engagement_id
+
+    if not _current_engagement_id:
+        return {
+            "status": "error",
+            "error": "Engagement not initialized. Call init_engagement first."
+        }
+
+    try:
+        # Get engagement directory
+        ntree_home = Path(os.getenv("NTREE_HOME", str(Path.home() / "ntree")))
+        engagement_dir = ntree_home / "engagements" / _current_engagement_id
+        state_file = engagement_dir / "state.json"
+
+        if not state_file.exists():
+            return {
+                "status": "error",
+                "error": f"State file not found for engagement {_current_engagement_id}"
+            }
+
+        # Load current state
+        state = json.loads(state_file.read_text())
+
+        # Update phase if provided
+        if phase:
+            state["phase"] = phase.upper()
+
+        # Initialize discovered_assets if not present
+        if "discovered_assets" not in state:
+            state["discovered_assets"] = {
+                "hosts": [],
+                "services": [],
+                "credentials": []
+            }
+
+        # Add hosts (avoid duplicates)
+        if hosts:
+            existing_hosts = set(state["discovered_assets"]["hosts"])
+            for host in hosts:
+                if host not in existing_hosts:
+                    state["discovered_assets"]["hosts"].append(host)
+                    existing_hosts.add(host)
+
+        # Add services (avoid duplicates)
+        if services:
+            existing_services = set(state["discovered_assets"]["services"])
+            for service in services:
+                if service not in existing_services:
+                    state["discovered_assets"]["services"].append(service)
+                    existing_services.add(service)
+
+        # Add credentials (avoid duplicates)
+        if credentials:
+            existing_creds = set(state["discovered_assets"]["credentials"])
+            for cred in credentials:
+                if cred not in existing_creds:
+                    state["discovered_assets"]["credentials"].append(cred)
+                    existing_creds.add(cred)
+
+        # Update timestamp
+        state["updated"] = datetime.now().isoformat()
+
+        # Save state
+        state_file.write_text(json.dumps(state, indent=2))
+
+        logger.info(f"Updated state: phase={state.get('phase')}, "
+                   f"hosts={len(state['discovered_assets']['hosts'])}, "
+                   f"services={len(state['discovered_assets']['services'])}")
+
+        return {
+            "status": "success",
+            "engagement_id": _current_engagement_id,
+            "phase": state.get("phase", "UNKNOWN"),
+            "total_hosts": len(state["discovered_assets"]["hosts"]),
+            "total_services": len(state["discovered_assets"]["services"]),
+            "total_credentials": len(state["discovered_assets"]["credentials"]),
+            "total_findings": len(state.get("findings", []))
+        }
+
+    except Exception as e:
+        logger.error(f"Error updating state: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e)
         }
 
 

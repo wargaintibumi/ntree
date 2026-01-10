@@ -13,7 +13,8 @@ NTREE (Neural Tactical Red-Team Exploitation Engine) v2.0 is a fully autonomous 
 cd ntree-mcp-servers
 python3 -m venv venv
 source venv/bin/activate
-pip install -e .
+pip install -e .              # Production dependencies
+pip install -e ".[dev]"       # Include dev dependencies (pytest, black, ruff, mypy)
 ```
 
 ### Autonomous Agents Setup
@@ -24,10 +25,10 @@ pip install -r requirements.txt
 
 ### Testing
 ```bash
-# MCP server tests
+# Run all MCP server tests (from ntree-mcp-servers/)
 python test_servers.py
 
-# Specific test file
+# Run pytest on specific test file
 pytest tests/test_scope.py -v
 
 # With coverage
@@ -39,6 +40,16 @@ pytest tests/ --cov=ntree_mcp --cov-report=html
 black ntree_mcp/              # Format
 ruff check ntree_mcp/         # Lint
 mypy ntree_mcp/               # Type check
+```
+
+### Running Individual MCP Servers
+```bash
+ntree-scope                   # Scope validation server
+ntree-scan                    # Network scanning server
+ntree-enum                    # Service enumeration server
+ntree-vuln                    # Vulnerability testing server
+ntree-post                    # Post-exploitation server
+ntree-report                  # Reporting server
 ```
 
 ### Running NTREE
@@ -54,6 +65,13 @@ python ntree-autonomous/ntree_agent.py --scope ~/scope.txt
 python ntree-autonomous/ntree_agent_sdk.py --scope ~/scope.txt
 ```
 
+## Environment Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `NTREE_HOME` | Base directory for NTREE files | `~/ntree` |
+| `ANTHROPIC_API_KEY` | API key for autonomous mode | Required for autonomous |
+
 ## Architecture
 
 ### Three Operational Modes
@@ -66,7 +84,7 @@ python ntree-autonomous/ntree_agent_sdk.py --scope ~/scope.txt
 
 | Server | Purpose |
 |--------|---------|
-| `scope.py` | Scope validation, engagement initialization |
+| `scope.py` | Scope validation, engagement init, **save_finding**, **update_state** |
 | `scan.py` | Network discovery, nmap, passive recon |
 | `enum.py` | Service enumeration (web, SMB, LDAP, etc.) |
 | `vuln.py` | CVE testing, credential checking, exploit research |
@@ -74,6 +92,32 @@ python ntree-autonomous/ntree_agent_sdk.py --scope ~/scope.txt
 | `report.py` | Risk scoring, report generation |
 
 Utilities in `utils/`: `scope_parser.py`, `command_runner.py`, `nmap_parser.py`, `logger.py`
+
+### Critical: Data Flow for Real Reports
+
+For reports to contain real findings, Claude MUST follow this workflow:
+
+```
+1. init_engagement(scope_file)        → Creates engagement directory
+2. scan_network(targets)              → Returns real nmap results
+3. save_finding(                      → SAVES finding to findings/*.json
+     title="SMB Signing Disabled",
+     severity="high",
+     description="...",
+     affected_hosts=["192.168.1.10"],
+     evidence="nmap output...",
+     cvss_score=5.3,
+     remediation="Enable SMB signing"
+   )
+4. update_state(                      → Updates state.json with discovered assets
+     phase="ENUM",
+     hosts=["192.168.1.10", "192.168.1.11"],
+     services=["192.168.1.10:445/smb"]
+   )
+5. generate_report(engagement_id)     → Reads findings/*.json, generates report
+```
+
+**Without calling `save_finding()` after discovering vulnerabilities, reports will be empty!**
 
 ### Autonomous Agents (`ntree-autonomous/`)
 
@@ -86,6 +130,7 @@ Utilities in `utils/`: `scope_parser.py`, `command_runner.py`, `nmap_parser.py`,
 ### MCP Tool Pattern (all servers follow this)
 ```python
 from mcp.server import Server
+from mcp.types import Tool, TextContent
 from pydantic import BaseModel, Field
 
 app = Server("ntree-{module}")
@@ -126,7 +171,7 @@ except Exception as e:
 - **Scope validation**: Every action checked against authorized targets
 - **Rate limiting**: Max 3 credential attempts per account per 5 minutes
 - **Safe mode**: Validation without exploitation by default
-- **Approval workflow**: High-risk operations require explicit approval
+- **Approval workflow**: High-risk operations (extract_secrets, exploitation) require `approved=True`
 - **Circuit breakers**: Unresponsive targets automatically skipped
 - **Audit logging**: Complete action history with timestamps
 
@@ -149,15 +194,15 @@ engagements/eng_YYYYMMDD_HHMMSS/
 ├── state.json          # Engagement state
 ├── findings/           # Discovered vulnerabilities
 ├── scans/              # Tool outputs (nmap XML, etc.)
+├── evidence/           # Proof of exploitation
+├── credentials/        # Discovered credentials
 └── reports/            # Generated reports (HTML, JSON)
 ```
 
 ## Key Configuration Files
 
 - `ntree-mcp-servers/setup.py` - MCP package setup (Python 3.10+)
-- `ntree-mcp-servers/requirements.txt` - MCP dependencies
-- `ntree-autonomous/requirements.txt` - Autonomous agent dependencies
-- `ntree-autonomous/config.example.json` - Configuration template
+- `ntree-autonomous/config.example.json` - Configuration template for autonomous mode
 - `~/.config/claude-code/mcp-servers.json` - MCP server configuration for Claude Code
 
 ## Tech Stack
