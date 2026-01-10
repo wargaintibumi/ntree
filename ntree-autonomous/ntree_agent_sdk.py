@@ -25,7 +25,7 @@ except ImportError:
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "ntree-mcp-servers"))
 
-from ntree_mcp.scope import init_engagement, verify_scope
+from ntree_mcp.scope import init_assessment, verify_scope
 from ntree_mcp.scan import scan_network, passive_recon
 from ntree_mcp.enum import enumerate_services, enumerate_web, enumerate_smb, enumerate_domain
 from ntree_mcp.vuln import test_vuln, check_creds, search_exploits, analyze_config
@@ -65,7 +65,7 @@ class NTREEAgentSDK:
         self.work_dir = Path(work_dir or os.getenv("NTREE_WORK_DIR", "~/ntree/sessions")).expanduser()
         self.work_dir.mkdir(exist_ok=True, parents=True)
         self.prompts_dir = Path(__file__).parent / "prompts"
-        self.engagement_id: Optional[str] = None
+        self.assessment_id: Optional[str] = None
         self.findings: List[Dict] = []
 
         logger.info("NTREE Agent SDK initialized")
@@ -87,7 +87,7 @@ Your mission is to conduct thorough, professional penetration tests using the se
 You have access to NTREE MCP servers that provide these capabilities:
 
 **Scope Management:**
-- init_engagement - Initialize pentest with scope validation
+- init_assessment - Initialize pentest with scope validation
 - verify_scope - Check if target is in authorized scope
 
 **Reconnaissance:**
@@ -125,7 +125,7 @@ You have access to NTREE MCP servers that provide these capabilities:
 
 ## Workflow
 
-1. Initialize engagement with scope file
+1. Initialize assessment with scope file
 2. Scan networks to discover hosts
 3. Enumerate services on discovered hosts
 4. Test for vulnerabilities
@@ -142,11 +142,11 @@ Work autonomously, make intelligent decisions, and provide actionable security f
 
         Args:
             scope_file: Path to scope file
-            roe_file: Path to rules of engagement file
+            roe_file: Path to rules of assessment file
             max_iterations: Maximum conversation turns (safety limit)
 
         Returns:
-            Final engagement summary
+            Final assessment summary
         """
         logger.info("=" * 80)
         logger.info("STARTING AUTONOMOUS PENETRATION TEST (SDK MODE)")
@@ -170,7 +170,7 @@ Work autonomously, make intelligent decisions, and provide actionable security f
                 # Standard Claude Code tools
                 "Bash", "Glob", "Grep", "LS", "Read", "Write", "Edit",
                 # MCP tools for NTREE
-                "mcp__ntree-scope__init_engagement",
+                "mcp__ntree-scope__init_assessment",
                 "mcp__ntree-scope__verify_scope",
                 "mcp__ntree-scan__scan_network",
                 "mcp__ntree-scan__passive_recon",
@@ -347,7 +347,7 @@ Scope File: {scope_file}
 ROE File: {roe_file or 'None provided'}
 
 Your mission:
-1. Initialize the engagement using the init_engagement MCP tool
+1. Initialize the assessment using the init_assessment MCP tool
 2. Read the scope file to understand authorized targets
 3. Conduct thorough reconnaissance on in-scope targets
 4. Enumerate all discovered services
@@ -362,7 +362,7 @@ Important Instructions:
 - Document your findings as you discover them
 - When you complete all testing phases, generate a final report
 
-Start by initializing the engagement with the provided scope file."""
+Start by initializing the assessment with the provided scope file."""
 
         return prompt
 
@@ -422,7 +422,7 @@ Start by initializing the engagement with the provided scope file."""
         completion_indicators = [
             "penetration test complete",
             "testing complete",
-            "engagement complete",
+            "assessment complete",
             "assessment complete",
             "final report generated",
             "all testing phases completed"
@@ -474,13 +474,13 @@ Start by initializing the engagement with the provided scope file."""
             "completion_time": datetime.now().isoformat()
         }
 
-        # Try to find engagement ID from files
-        engagement_files = list(session_dir.glob("engagement_*.json"))
-        if engagement_files:
+        # Try to find assessment ID from files
+        assessment_files = list(session_dir.glob("assessment_*.json"))
+        if assessment_files:
             try:
-                with open(engagement_files[0]) as f:
-                    engagement_data = json.load(f)
-                    summary["engagement_id"] = engagement_data.get("engagement_id")
+                with open(assessment_files[0]) as f:
+                    assessment_data = json.load(f)
+                    summary["assessment_id"] = assessment_data.get("assessment_id")
             except:
                 pass
 

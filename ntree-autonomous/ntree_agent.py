@@ -17,7 +17,7 @@ import logging
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "ntree-mcp-servers"))
 
-from ntree_mcp.scope import init_engagement, verify_scope
+from ntree_mcp.scope import init_assessment, verify_scope
 from ntree_mcp.scan import scan_network, passive_recon
 from ntree_mcp.enum import enumerate_services, enumerate_web, enumerate_smb, enumerate_domain
 from ntree_mcp.vuln import test_vuln, check_creds, search_exploits, analyze_config
@@ -56,7 +56,7 @@ class NTREEAgent:
             raise ValueError("ANTHROPIC_API_KEY environment variable or api_key parameter required")
 
         self.client = Anthropic(api_key=self.api_key)
-        self.engagement_id: Optional[str] = None
+        self.assessment_id: Optional[str] = None
         self.conversation_history: List[Dict] = []
         self.findings: List[Dict] = []
 
@@ -82,7 +82,7 @@ Your mission is to conduct thorough, professional penetration tests following in
 ## Penetration Test Phases
 
 ### Phase 1: Reconnaissance
-- Initialize engagement and validate scope
+- Initialize assessment and validate scope
 - Passive reconnaissance (DNS, WHOIS)
 - Network discovery and host enumeration
 - Service identification
@@ -139,7 +139,7 @@ You will work independently to:
 3. Identify and prioritize targets
 4. Determine which vulnerabilities to investigate
 5. Decide when to move between phases
-6. Complete the engagement and generate reports
+6. Complete the assessment and generate reports
 
 Work systematically, thoroughly, and professionally. Your goal is to identify security weaknesses
 while maintaining strict safety controls and providing actionable remediation guidance."""
@@ -148,8 +148,8 @@ while maintaining strict safety controls and providing actionable remediation gu
         """Get tool definitions for Claude SDK function calling."""
         return [
             {
-                "name": "init_engagement",
-                "description": "Initialize penetration test engagement with scope validation. MUST be called first.",
+                "name": "init_assessment",
+                "description": "Initialize penetration test assessment with scope validation. MUST be called first.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
@@ -159,7 +159,7 @@ while maintaining strict safety controls and providing actionable remediation gu
                         },
                         "roe_file": {
                             "type": "string",
-                            "description": "Path to rules of engagement file (optional)"
+                            "description": "Path to rules of assessment file (optional)"
                         }
                     },
                     "required": ["scope_file"]
@@ -494,12 +494,12 @@ while maintaining strict safety controls and providing actionable remediation gu
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "engagement_id": {
+                        "assessment_id": {
                             "type": "string",
-                            "description": "Engagement ID"
+                            "description": "Assessment ID"
                         }
                     },
-                    "required": ["engagement_id"]
+                    "required": ["assessment_id"]
                 }
             },
             {
@@ -508,9 +508,9 @@ while maintaining strict safety controls and providing actionable remediation gu
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "engagement_id": {
+                        "assessment_id": {
                             "type": "string",
-                            "description": "Engagement ID"
+                            "description": "Assessment ID"
                         },
                         "format": {
                             "type": "string",
@@ -523,7 +523,7 @@ while maintaining strict safety controls and providing actionable remediation gu
                             "description": "Output file format"
                         }
                     },
-                    "required": ["engagement_id", "format"]
+                    "required": ["assessment_id", "format"]
                 }
             }
         ]
@@ -535,7 +535,7 @@ while maintaining strict safety controls and providing actionable remediation gu
         try:
             # Map tool names to functions
             tool_map = {
-                "init_engagement": init_engagement,
+                "init_assessment": init_assessment,
                 "verify_scope": verify_scope,
                 "scan_network": scan_network,
                 "passive_recon": passive_recon,
@@ -560,10 +560,10 @@ while maintaining strict safety controls and providing actionable remediation gu
             # Execute the tool
             result = await tool_map[tool_name](**tool_input)
 
-            # Store engagement ID if this was init_engagement
-            if tool_name == "init_engagement" and result.get("status") == "success":
-                self.engagement_id = result.get("engagement_id")
-                logger.info(f"Engagement initialized: {self.engagement_id}")
+            # Store assessment ID if this was init_assessment
+            if tool_name == "init_assessment" and result.get("status") == "success":
+                self.assessment_id = result.get("assessment_id")
+                logger.info(f"Assessment initialized: {self.assessment_id}")
 
             # Track findings for reporting
             if "findings" in result:
@@ -583,11 +583,11 @@ while maintaining strict safety controls and providing actionable remediation gu
 
         Args:
             scope_file: Path to scope file
-            roe_file: Path to rules of engagement file
+            roe_file: Path to rules of assessment file
             max_iterations: Maximum conversation turns (safety limit)
 
         Returns:
-            Final engagement summary
+            Final assessment summary
         """
         logger.info("=" * 80)
         logger.info("STARTING AUTONOMOUS PENETRATION TEST")
@@ -603,7 +603,7 @@ Scope File: {scope_file}
 ROE File: {roe_file or 'None provided'}
 
 Your mission:
-1. Initialize the engagement
+1. Initialize the assessment
 2. Conduct thorough reconnaissance
 3. Enumerate all discovered services
 4. Test for vulnerabilities
@@ -613,7 +613,7 @@ Your mission:
 Work autonomously through all phases. Make decisions based on findings.
 Be thorough, professional, and follow all safety protocols.
 
-Start by initializing the engagement with the provided scope file."""
+Start by initializing the assessment with the provided scope file."""
 
         self.conversation_history = [{"role": "user", "content": initial_message}]
 
@@ -675,7 +675,7 @@ Start by initializing the engagement with the provided scope file."""
 
                     # Check if penetration test is complete
                     if any(keyword in final_text.lower() for keyword in
-                           ["penetration test complete", "testing complete", "engagement complete",
+                           ["penetration test complete", "testing complete", "assessment complete",
                             "test completed", "assessment complete"]):
                         logger.info("Penetration test marked as complete by Claude")
                         break
@@ -701,7 +701,7 @@ Start by initializing the engagement with the provided scope file."""
 
         summary = {
             "status": "complete",
-            "engagement_id": self.engagement_id,
+            "assessment_id": self.assessment_id,
             "iterations": iteration,
             "findings_count": len(self.findings),
             "conversation_turns": len(self.conversation_history),
