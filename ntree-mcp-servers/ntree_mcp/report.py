@@ -495,9 +495,9 @@ This penetration test was conducted to assess the security posture of the target
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| ✅ Confirmed | {exploitation_stats['CONFIRMED']} | Successfully exploited with proof |
-| ⚠️ Needs Verification | {exploitation_stats['NEEDS_VERIFICATION']} | Evidence exists but requires manual testing |
-| ❓ Requires Check | {exploitation_stats['REQUIRES_MANUAL_CHECK']} | Vulnerability detected, manual verification needed |
+| Confirmed | {exploitation_stats['CONFIRMED']} | Successfully exploited with proof |
+| Needs Verification | {exploitation_stats['NEEDS_VERIFICATION']} | Evidence exists but requires manual testing |
+| Requires Check | {exploitation_stats['REQUIRES_MANUAL_CHECK']} | Vulnerability detected, manual verification needed |
 
 ---
 
@@ -511,10 +511,10 @@ This penetration test was conducted to assess the security posture of the target
     for i, finding in enumerate(critical_findings[:5], 1):
         exploit_status = finding.get('exploitation_status', 'UNKNOWN')
         exploit_badge = {
-            'CONFIRMED': '✅ Exploited',
-            'NEEDS_VERIFICATION': '⚠️ Needs Manual Verification',
-            'REQUIRES_MANUAL_CHECK': '❓ Requires Manual Check',
-            'UNKNOWN': '❓ Unknown'
+            'CONFIRMED': 'Exploited',
+            'NEEDS_VERIFICATION': 'Needs Manual Verification',
+            'REQUIRES_MANUAL_CHECK': 'Requires Manual Check',
+            'UNKNOWN': 'Unknown'
         }.get(exploit_status, exploit_status)
 
         report += f"""### {i}. {finding.get('title', 'Unknown Finding')}
@@ -620,10 +620,10 @@ def _generate_technical_report(state: dict, findings: List[dict], risk: dict) ->
         severity = finding.get('severity', 'unknown').upper()
         exploit_status = finding.get('exploitation_status', 'UNKNOWN')
         exploit_badge = {
-            'CONFIRMED': '✅ Exploited Successfully',
-            'NEEDS_VERIFICATION': '⚠️ Needs Manual Verification',
-            'REQUIRES_MANUAL_CHECK': '❓ Requires Manual Check',
-            'UNKNOWN': '❓ Unknown'
+            'CONFIRMED': 'Exploited Successfully',
+            'NEEDS_VERIFICATION': 'Needs Manual Verification',
+            'REQUIRES_MANUAL_CHECK': 'Requires Manual Check',
+            'UNKNOWN': 'Unknown'
         }.get(exploit_status, exploit_status)
 
         report += f"""### Finding #{i}: {finding.get('title', 'Unknown')}
@@ -953,20 +953,40 @@ def _markdown_to_html(markdown_content: str) -> str:
     return html
 
 
+def _generate_anchor_id(text: str) -> str:
+    """Generate a URL-friendly anchor ID from text."""
+    import re
+    # Remove special characters and convert to lowercase
+    anchor = re.sub(r'[^a-zA-Z0-9\s-]', '', text.lower())
+    # Replace spaces with hyphens
+    anchor = re.sub(r'\s+', '-', anchor.strip())
+    # Remove multiple consecutive hyphens
+    anchor = re.sub(r'-+', '-', anchor)
+    return anchor
+
+
 def _convert_markdown_headers(text: str) -> str:
-    """Convert markdown headers to HTML."""
+    """Convert markdown headers to HTML with anchor IDs."""
     lines = text.split('\n')
     result = []
 
     for line in lines:
         if line.startswith('# '):
-            result.append(f'<h1>{line[2:]}</h1>')
+            title = line[2:].strip()
+            anchor = _generate_anchor_id(title)
+            result.append(f'<h1 id="{anchor}">{title}</h1>')
         elif line.startswith('## '):
-            result.append(f'<h2>{line[3:]}</h2>')
+            title = line[3:].strip()
+            anchor = _generate_anchor_id(title)
+            result.append(f'<h2 id="{anchor}">{title}</h2>')
         elif line.startswith('### '):
-            result.append(f'<h3>{line[4:]}</h3>')
+            title = line[4:].strip()
+            anchor = _generate_anchor_id(title)
+            result.append(f'<h3 id="{anchor}">{title}</h3>')
         elif line.startswith('#### '):
-            result.append(f'<h4>{line[5:]}</h4>')
+            title = line[5:].strip()
+            anchor = _generate_anchor_id(title)
+            result.append(f'<h4 id="{anchor}">{title}</h4>')
         else:
             result.append(line)
 
@@ -1090,49 +1110,89 @@ def _convert_markdown_links(text: str) -> str:
 
 def _add_severity_styling(text: str) -> str:
     """Add severity badge styling and exploitation status badges."""
-    # Severity badges
-    text = text.replace('CRITICAL', '<span class="severity-badge severity-critical">CRITICAL</span>')
-    text = text.replace('HIGH', '<span class="severity-badge severity-high">HIGH</span>')
-    text = text.replace('MEDIUM', '<span class="severity-badge severity-medium">MEDIUM</span>')
-    text = text.replace('LOW', '<span class="severity-badge severity-low">LOW</span>')
+    import re
 
-    # Exploitation status badges
-    text = text.replace('✅ Exploited Successfully', '<span class="exploit-status-badge exploit-confirmed">Confirmed</span>')
-    text = text.replace('✅ Exploited', '<span class="exploit-status-badge exploit-confirmed">Confirmed</span>')
-    text = text.replace('⚠️ Needs Manual Verification', '<span class="exploit-status-badge exploit-needs-verification">Needs Verification</span>')
-    text = text.replace('❓ Requires Manual Check', '<span class="exploit-status-badge exploit-requires-check">Requires Check</span>')
-    text = text.replace('❓ Unknown', '<span class="exploit-status-badge exploit-requires-check">Unknown</span>')
+    # Severity badges - use word boundaries to avoid partial matches
+    text = re.sub(r'\bCRITICAL\b', '<span class="severity-badge severity-critical">Critical</span>', text)
+    text = re.sub(r'\bHIGH\b', '<span class="severity-badge severity-high">High</span>', text)
+    text = re.sub(r'\bMEDIUM\b', '<span class="severity-badge severity-medium">Medium</span>', text)
+    text = re.sub(r'\bLOW\b', '<span class="severity-badge severity-low">Low</span>', text)
+    text = re.sub(r'\bINFORMATIONAL\b', '<span class="severity-badge severity-informational">Info</span>', text)
+
+    # Exploitation status badges - clean text without emojis
+    text = text.replace('Exploited Successfully', '<span class="exploit-status-badge exploit-confirmed">Confirmed</span>')
+    text = text.replace('Exploited', '<span class="exploit-status-badge exploit-confirmed">Confirmed</span>')
+    text = text.replace('Needs Manual Verification', '<span class="exploit-status-badge exploit-needs-verification">Needs Verification</span>')
+    text = text.replace('Requires Manual Check', '<span class="exploit-status-badge exploit-requires-check">Requires Check</span>')
+
+    # Remove standalone emojis that might have been included
+    text = text.replace('✅ ', '')
+    text = text.replace('⚠️ ', '')
+    text = text.replace('❓ ', '')
 
     # Verification notices
-    if '**Note**: This finding requires manual verification' in text:
+    if 'This finding requires manual verification' in text:
         text = text.replace('**Note**: This finding requires manual verification. The evidence above shows the vulnerability exists but successful exploitation has not been confirmed.',
-                          '<div class="verification-notice"><strong>⚠️ Manual Verification Required</strong><p>The evidence above shows the vulnerability exists but successful exploitation has not been confirmed. Manual testing is recommended to validate exploitability.</p></div>')
+                          '<div class="verification-notice"><strong>Manual Verification Required</strong><p>The evidence above shows the vulnerability exists but successful exploitation has not been confirmed. Manual testing is recommended to validate exploitability.</p></div>')
 
     return text
 
 
 def _wrap_paragraphs(text: str) -> str:
-    """Wrap text in paragraph tags."""
+    """Wrap text in paragraph tags, preserving HTML structure."""
     lines = text.split('\n')
     result = []
-    in_tag = False
+    in_block = False
+    block_depth = 0
+
+    # Tags that indicate block-level content (don't wrap these)
+    block_tags = {'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'div', 'table', 'thead',
+                  'tbody', 'tr', 'th', 'td', 'ul', 'ol', 'li', 'pre', 'code',
+                  'blockquote', 'hr', 'p', 'span', 'strong', 'em', 'a'}
 
     for line in lines:
         stripped = line.strip()
 
-        # Check if line is already in an HTML tag
+        # Skip empty lines
+        if not stripped:
+            result.append(line)
+            continue
+
+        # Skip horizontal rules
+        if stripped == '---' or stripped.startswith('---'):
+            result.append('<hr>')
+            continue
+
+        # Check if this line starts with an HTML tag
         if stripped.startswith('<'):
-            in_tag = True
             result.append(line)
-            if '>' in stripped and not stripped.startswith('<!--'):
-                # Check if tag closes on same line
-                if stripped.count('<') == stripped.count('>'):
-                    in_tag = False
-        elif stripped.endswith('>'):
+            # Track block depth for multi-line elements
+            for tag in block_tags:
+                if f'<{tag}' in stripped.lower():
+                    block_depth += stripped.lower().count(f'<{tag}')
+                if f'</{tag}>' in stripped.lower():
+                    block_depth -= stripped.lower().count(f'</{tag}>')
+            block_depth = max(0, block_depth)
+            continue
+
+        # Check if line ends with closing tag
+        if stripped.endswith('>'):
             result.append(line)
-            in_tag = False
-        elif not in_tag and stripped and not stripped.startswith('---'):
-            result.append(f'<p>{line}</p>')
+            for tag in block_tags:
+                if f'</{tag}>' in stripped.lower():
+                    block_depth -= 1
+            block_depth = max(0, block_depth)
+            continue
+
+        # If we're inside a block element, don't wrap
+        if block_depth > 0:
+            result.append(line)
+            continue
+
+        # Plain text - wrap in paragraph if it looks like content
+        # Don't wrap if it's just whitespace or looks like a label
+        if stripped and not stripped.endswith(':'):
+            result.append(f'<p>{stripped}</p>')
         else:
             result.append(line)
 
@@ -1140,32 +1200,79 @@ def _wrap_paragraphs(text: str) -> str:
 
 
 def _markdown_to_html_fallback(markdown_content: str) -> str:
-    """Fallback HTML conversion (simple wrapper)."""
+    """Fallback HTML conversion (simple wrapper with soft colors)."""
     html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <title>NTREE Penetration Test Report</title>
     <style>
+        :root {{
+            --color-bg: #faf9f7;
+            --color-surface: #ffffff;
+            --color-border: #e8e4df;
+            --color-primary: #5a9a9a;
+            --color-text: #3d3d3d;
+            --color-text-muted: #6b6b6b;
+        }}
         body {{
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
             max-width: 1000px;
             margin: 0 auto;
-            padding: 20px;
-            line-height: 1.6;
+            padding: 40px 20px;
+            line-height: 1.7;
+            background: var(--color-bg);
+            color: var(--color-text);
         }}
-        h1 {{ color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }}
-        h2 {{ color: #34495e; border-bottom: 2px solid #95a5a6; padding-bottom: 5px; }}
-        h3 {{ color: #7f8c8d; }}
-        table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
-        th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
-        th {{ background-color: #3498db; color: white; }}
-        code {{ background-color: #f4f4f4; padding: 2px 6px; border-radius: 3px; }}
-        pre {{ background-color: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }}
-        .critical {{ color: #c0392b; font-weight: bold; }}
-        .high {{ color: #e74c3c; font-weight: bold; }}
-        .medium {{ color: #f39c12; font-weight: bold; }}
-        .low {{ color: #3498db; font-weight: bold; }}
+        h1 {{
+            color: var(--color-text);
+            border-bottom: 2px solid var(--color-border);
+            padding-bottom: 12px;
+            margin-top: 40px;
+        }}
+        h2 {{
+            color: var(--color-text);
+            margin-top: 35px;
+        }}
+        h3 {{
+            color: var(--color-text-muted);
+            margin-top: 28px;
+        }}
+        table {{
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            background: var(--color-surface);
+        }}
+        th, td {{
+            border: 1px solid var(--color-border);
+            padding: 12px 16px;
+            text-align: left;
+        }}
+        th {{
+            background: #f5f3f0;
+            color: var(--color-text);
+            font-weight: 600;
+        }}
+        code {{
+            background: #f5f3f0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }}
+        pre {{
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }}
+        .severity-critical {{ color: #c75050; font-weight: 600; }}
+        .severity-high {{ color: #d68847; font-weight: 600; }}
+        .severity-medium {{ color: #c9a227; font-weight: 600; }}
+        .severity-low {{ color: #5a9a9a; font-weight: 600; }}
+        a {{ color: var(--color-primary); text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
     </style>
 </head>
 <body>

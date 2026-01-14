@@ -664,15 +664,19 @@ class NTREEMonitor:
                 if output_lines:
                     # Clear status line before printing new output
                     print("\r" + " " * 150, end="\r")
+                    # ANSI escape pattern for stripping color codes
+                    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
                     # Filter out empty lines before printing
-                    for line in output_lines:
-                        # Strip ANSI codes for empty check but print original
-                        import re
-                        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-                        stripped = ansi_escape.sub('', line) if line else ''
-                        # Only print if there's actual visible content after stripping ANSI codes
-                        if stripped.strip():
-                            print(line)
+                    for item in output_lines:
+                        if not item:
+                            continue
+                        # Handle multi-line strings (e.g., from format_finding)
+                        for line in item.split('\n'):
+                            # Strip ANSI codes for empty check but print original
+                            stripped = ansi_escape.sub('', line)
+                            # Only print if there's actual visible content
+                            if stripped.strip():
+                                print(line)
                     self.print_status_line()
                 else:
                     # Even if no events, refresh the status line to show elapsed time
