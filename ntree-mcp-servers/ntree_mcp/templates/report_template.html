@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - NTREE Penetration Test Report</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #1a202c;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-attachment: fixed;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 20px auto;
+            background: white;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+            color: white;
+            padding: 60px 40px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg"><defs><pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>');
+            opacity: 0.5;
+        }
+
+        .header h1 {
+            font-size: 3em;
+            margin-bottom: 15px;
+            font-weight: 700;
+            position: relative;
+            z-index: 1;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header .subtitle {
+            font-size: 1.3em;
+            opacity: 0.95;
+            position: relative;
+            z-index: 1;
+            font-weight: 300;
+        }
+
+        /* Assessment Info */
+        .engagement-info {
+            background: linear-gradient(to right, #f8f9fa 0%, #ffffff 100%);
+            padding: 40px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .engagement-info h2 {
+            color: #2d3748;
+            margin-bottom: 25px;
+            font-size: 2em;
+            font-weight: 600;
+            position: relative;
+            padding-bottom: 12px;
+        }
+
+        .engagement-info h2::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 60px;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 2px;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+        }
+
+        .info-item {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            border: 2px solid #e2e8f0;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .info-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .info-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.15);
+            border-color: #667eea;
+        }
+
+        .info-item label {
+            font-weight: 600;
+            color: #718096;
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .info-item value {
+            font-size: 1.25em;
+            color: #2d3748;
+            font-weight: 600;
+        }
+
+        /* Risk Level Badge */
+        .risk-badge {
+            display: inline-block;
+            padding: 12px 28px;
+            border-radius: 30px;
+            font-weight: 700;
+            font-size: 1.1em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            transition: transform 0.2s ease;
+        }
+
+        .risk-badge:hover {
+            transform: scale(1.05);
+        }
+
+        .risk-critical {
+            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+            color: white;
+            animation: pulse-critical 2s infinite;
+        }
+
+        @keyframes pulse-critical {
+            0%, 100% { box-shadow: 0 4px 15px rgba(220, 38, 38, 0.3); }
+            50% { box-shadow: 0 4px 25px rgba(220, 38, 38, 0.6); }
+        }
+
+        .risk-high {
+            background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%);
+            color: white;
+        }
+
+        .risk-medium {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+        }
+
+        .risk-low {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: white;
+        }
+
+        .risk-informational {
+            background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+            color: white;
+        }
+
+        /* Content Section */
+        .content {
+            padding: 40px;
+        }
+
+        .section {
+            margin-bottom: 50px;
+        }
+
+        .section h1,
+        h1 {
+            color: #1a202c;
+            margin: 40px 0 25px 0;
+            font-size: 2.5em;
+            font-weight: 800;
+            position: relative;
+            padding-bottom: 15px;
+        }
+
+        .section h1::after,
+        h1::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 80px;
+            height: 5px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 3px;
+        }
+
+        .section h2,
+        h2 {
+            color: #2d3748;
+            margin: 35px 0 20px 0;
+            font-size: 2em;
+            font-weight: 700;
+            position: relative;
+            padding-bottom: 12px;
+        }
+
+        .section h2::after,
+        h2::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 60px;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 2px;
+        }
+
+        .section h3,
+        h3 {
+            color: #4a5568;
+            margin-top: 30px;
+            margin-bottom: 18px;
+            font-size: 1.6em;
+            font-weight: 600;
+        }
+
+        .section h4,
+        h4 {
+            color: #718096;
+            margin-top: 25px;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+            font-weight: 600;
+        }
+
+        /* Content Paragraphs */
+        .content p {
+            margin: 15px 0;
+            line-height: 1.8;
+            color: #2d3748;
+        }
+
+        /* Content Lists */
+        .content ul,
+        .content ol {
+            margin: 15px 0;
+            padding-left: 30px;
+        }
+
+        .content li {
+            margin: 10px 0;
+            line-height: 1.7;
+            color: #2d3748;
+        }
+
+        /* Executive Summary */
+        .executive-summary {
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            padding: 30px;
+            border-radius: 16px;
+            margin: 25px 0;
+            border: 2px solid #e2e8f0;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .executive-summary::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 6px;
+            height: 100%;
+            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .executive-summary p {
+            font-size: 1.1em;
+            line-height: 1.9;
+            margin-bottom: 18px;
+            color: #2d3748;
+            padding-left: 15px;
+        }
+
+        /* Risk Matrix Table */
+        .risk-matrix {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .risk-matrix th,
+        .risk-matrix td {
+            padding: 15px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+
+        .risk-matrix th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .risk-matrix tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        .risk-matrix tr:hover {
+            background: #e9ecef;
+        }
+
+        /* Severity Badge in Table */
+        .severity-badge {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .severity-critical {
+            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+            color: white;
+        }
+
+        .severity-critical::before {
+            content: '🔴 ';
+        }
+
+        .severity-high {
+            background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%);
+            color: white;
+        }
+
+        .severity-high::before {
+            content: '🟠 ';
+        }
+
+        .severity-medium {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+        }
+
+        .severity-medium::before {
+            content: '🟡 ';
+        }
+
+        .severity-low {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+            color: white;
+        }
+
+        .severity-low::before {
+            content: '🔵 ';
+        }
+
+        .severity-informational {
+            background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+            color: white;
+        }
+
+        .severity-informational::before {
+            content: 'ℹ️ ';
+        }
+
+        /* Exploitation Status Badge */
+        .exploit-status-badge {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-left: 10px;
+        }
+
+        .exploit-confirmed {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+        }
+
+        .exploit-confirmed::before {
+            content: '✅ ';
+        }
+
+        .exploit-needs-verification {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+        }
+
+        .exploit-needs-verification::before {
+            content: '⚠️ ';
+        }
+
+        .exploit-requires-check {
+            background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+            color: white;
+        }
+
+        .exploit-requires-check::before {
+            content: '❓ ';
+        }
+
+        /* Manual Verification Notice */
+        .verification-notice {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-left: 6px solid #f59e0b;
+            padding: 20px;
+            border-radius: 12px;
+            margin: 20px 0;
+            box-shadow: 0 2px 12px rgba(245, 158, 11, 0.15);
+        }
+
+        .verification-notice strong {
+            color: #92400e;
+            font-size: 1.1em;
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        .verification-notice p {
+            color: #92400e;
+            line-height: 1.7;
+            margin: 0;
+        }
+
+        /* Finding Card */
+        .finding {
+            background: white;
+            border: 2px solid #e2e8f0;
+            border-radius: 16px;
+            margin: 30px 0;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            overflow: hidden;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .finding:hover {
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+            transform: translateY(-2px);
+        }
+
+        .finding::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 5px;
+            height: 100%;
+            background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .finding-header {
+            padding: 25px 25px 25px 35px;
+            background: linear-gradient(to right, #f7fafc 0%, #ffffff 100%);
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .finding-header h3 {
+            margin: 0 0 12px 0;
+            color: #1a202c;
+            font-size: 1.5em;
+            font-weight: 700;
+        }
+
+        .finding-meta {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .finding-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .finding-meta-item strong {
+            color: #667eea;
+        }
+
+        .finding-body {
+            padding: 20px;
+        }
+
+        .finding-body p {
+            margin-bottom: 15px;
+            line-height: 1.8;
+        }
+
+        /* Evidence Box */
+        .evidence {
+            background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+            color: #e2e8f0;
+            padding: 25px;
+            border-radius: 12px;
+            margin: 20px 0;
+            overflow-x: auto;
+            font-family: 'SF Mono', 'Monaco', 'Consolas', 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.7;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            border: 1px solid #4a5568;
+            position: relative;
+        }
+
+        .evidence::before {
+            content: 'Evidence';
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: rgba(102, 126, 234, 0.2);
+            color: #a0aec0;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.75em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .evidence pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin: 0;
+            color: #cbd5e0;
+        }
+
+        .evidence code {
+            color: #68d391;
+        }
+
+        /* Remediation Box */
+        .remediation {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            border-left: 6px solid #28a745;
+            padding: 25px;
+            border-radius: 12px;
+            margin: 20px 0;
+            box-shadow: 0 2px 12px rgba(40, 167, 69, 0.1);
+        }
+
+        .remediation h4 {
+            color: #155724;
+            margin-top: 0;
+            font-size: 1.2em;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .remediation h4::before {
+            content: '✅';
+            font-size: 1.2em;
+        }
+
+        .remediation p {
+            color: #155724;
+            margin-bottom: 12px;
+            line-height: 1.7;
+        }
+
+        .remediation ul {
+            margin: 10px 0;
+            padding-left: 25px;
+        }
+
+        .remediation li {
+            margin: 8px 0;
+            color: #155724;
+        }
+
+        /* Attack Path */
+        .attack-path {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+            border-left: 6px solid #f59e0b;
+            padding: 25px;
+            border-radius: 12px;
+            margin: 20px 0;
+            box-shadow: 0 2px 12px rgba(245, 158, 11, 0.15);
+            position: relative;
+        }
+
+        .attack-path::before {
+            content: '⚠️';
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 1.5em;
+        }
+
+        .attack-path h4 {
+            color: #92400e;
+            margin-top: 0;
+            font-size: 1.2em;
+            font-weight: 600;
+        }
+
+        .attack-path p {
+            color: #92400e;
+            line-height: 1.7;
+        }
+
+        /* Metrics */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 25px;
+            margin: 30px 0;
+        }
+
+        .metric-card {
+            background: white;
+            color: #1a202c;
+            padding: 30px;
+            border-radius: 16px;
+            text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            border: 2px solid #e2e8f0;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 5px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .metric-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 30px rgba(102, 126, 234, 0.2);
+            border-color: #667eea;
+        }
+
+        .metric-card .value {
+            font-size: 3em;
+            font-weight: 800;
+            display: block;
+            margin-bottom: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .metric-card .label {
+            font-size: 0.95em;
+            color: #718096;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: 600;
+        }
+
+        /* Table of Contents */
+        .toc {
+            background: white;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 30px 0;
+            box-shadow: 0 2px 15px rgba(0,0,0,0.05);
+        }
+
+        .toc h3 {
+            color: #2d3748;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            padding-bottom: 12px;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .toc ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .toc li {
+            margin: 12px 0;
+        }
+
+        .toc a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            display: block;
+            padding: 8px 12px;
+            border-radius: 6px;
+        }
+
+        .toc a:hover {
+            background: #f7fafc;
+            color: #764ba2;
+            padding-left: 20px;
+        }
+
+        /* References */
+        .references {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+
+        .references ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .references li {
+            padding: 5px 0;
+        }
+
+        .references a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .references a:hover {
+            text-decoration: underline;
+        }
+
+        /* Footer */
+        .footer {
+            background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
+            color: white;
+            padding: 50px 40px;
+            text-align: center;
+            border-top: 5px solid #667eea;
+        }
+
+        .footer p {
+            margin: 8px 0;
+            opacity: 0.85;
+            font-size: 0.95em;
+        }
+
+        .footer .logo {
+            font-size: 2em;
+            font-weight: 800;
+            margin-bottom: 15px;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: 2px;
+        }
+
+        /* Print Styles */
+        @media print {
+            body {
+                background: white;
+            }
+
+            .container {
+                box-shadow: none;
+            }
+
+            .finding {
+                page-break-inside: avoid;
+            }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            .info-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>{{ title }}</h1>
+            <div class="subtitle">Penetration Testing Report</div>
+            <div class="subtitle" style="margin-top: 10px;">Generated by NTREE v2.0</div>
+        </div>
+
+        <!-- Assessment Information -->
+        <div class="engagement-info">
+            <h2>Assessment Information</h2>
+            <div class="info-grid">
+                <div class="info-item">
+                    <label>Assessment ID:</label>
+                    <value>{{ assessment_id }}</value>
+                </div>
+                <div class="info-item">
+                    <label>Test Date:</label>
+                    <value>{{ test_date }}</value>
+                </div>
+                <div class="info-item">
+                    <label>Duration:</label>
+                    <value>{{ duration }} hours</value>
+                </div>
+                <div class="info-item">
+                    <label>Overall Risk:</label>
+                    <value><span class="risk-badge risk-{{ overall_risk }}">{{ overall_risk }}</span></value>
+                </div>
+            </div>
+        </div>
+
+        <!-- Target Scope -->
+        <div class="engagement-info" style="background: #fff; border-bottom: 3px solid #667eea;">
+            <h2>Target Scope</h2>
+            <div class="references">
+                <ul>
+                    {{ scope_list }}
+                </ul>
+            </div>
+        </div>
+
+        <!-- Tools Used -->
+        <div class="engagement-info" style="background: #f8f9fa; border-bottom: 3px solid #667eea;">
+            <h2>Tools & Methodology</h2>
+            <div class="info-grid">
+                <div class="info-item" style="grid-column: span 2;">
+                    <label>Security Tools Used:</label>
+                    <div class="references">
+                        <ul>
+                            {{ tools_list }}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content">
+            {{ content }}
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <div class="logo">NTREE v2.0</div>
+            <p>Neural Tactical Red-Team Exploitation Engine</p>
+            <p>Assessment ID: {{ assessment_id }}</p>
+            <p>Report Generated: {{ generation_date }}</p>
+            <p style="margin-top: 20px; opacity: 0.6; font-size: 0.9em;">
+                This report contains confidential security assessment data. Handle with appropriate care.
+            </p>
+        </div>
+    </div>
+
+    <!-- Back to Top Button -->
+    <button id="backToTop" title="Back to Top" style="
+        display: none;
+        position: fixed;
+        bottom: 30px;
+        right: 30px;
+        z-index: 1000;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 55px;
+        height: 55px;
+        font-size: 24px;
+        cursor: pointer;
+        box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+        transition: all 0.3s ease;
+    ">↑</button>
+
+    <script>
+        // Back to Top Button
+        const backToTopBtn = document.getElementById('backToTop');
+
+        window.addEventListener('scroll', () => {
+            if (window.pageYOffset > 300) {
+                backToTopBtn.style.display = 'block';
+            } else {
+                backToTopBtn.style.display = 'none';
+            }
+        });
+
+        backToTopBtn.addEventListener('click', () => {
+            window.scrollTo({
+                top: 0,
+                behavior: 'smooth'
+            });
+        });
+
+        backToTopBtn.addEventListener('mouseenter', () => {
+            backToTopBtn.style.transform = 'scale(1.1)';
+            backToTopBtn.style.boxShadow = '0 6px 30px rgba(102, 126, 234, 0.6)';
+        });
+
+        backToTopBtn.addEventListener('mouseleave', () => {
+            backToTopBtn.style.transform = 'scale(1)';
+            backToTopBtn.style.boxShadow = '0 4px 20px rgba(102, 126, 234, 0.4)';
+        });
+
+        // Add copy button to evidence blocks
+        document.querySelectorAll('.evidence').forEach(block => {
+            const copyBtn = document.createElement('button');
+            copyBtn.textContent = 'Copy';
+            copyBtn.style.cssText = `
+                position: absolute;
+                top: 10px;
+                left: 15px;
+                background: rgba(102, 126, 234, 0.8);
+                color: white;
+                border: none;
+                padding: 6px 14px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 0.75em;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                transition: all 0.2s ease;
+            `;
+
+            copyBtn.addEventListener('click', () => {
+                const text = block.querySelector('pre').textContent;
+                navigator.clipboard.writeText(text).then(() => {
+                    copyBtn.textContent = 'Copied!';
+                    copyBtn.style.background = 'rgba(72, 187, 120, 0.8)';
+                    setTimeout(() => {
+                        copyBtn.textContent = 'Copy';
+                        copyBtn.style.background = 'rgba(102, 126, 234, 0.8)';
+                    }, 2000);
+                });
+            });
+
+            copyBtn.addEventListener('mouseenter', () => {
+                copyBtn.style.background = 'rgba(118, 75, 162, 0.9)';
+                copyBtn.style.transform = 'scale(1.05)';
+            });
+
+            copyBtn.addEventListener('mouseleave', () => {
+                copyBtn.style.background = 'rgba(102, 126, 234, 0.8)';
+                copyBtn.style.transform = 'scale(1)';
+            });
+
+            block.style.position = 'relative';
+            block.insertBefore(copyBtn, block.firstChild);
+        });
+
+        // Print Report Function
+        function printReport() {
+            window.print();
+        }
+
+        // Add print button to header if needed
+        if (window.location.protocol === 'file:' || window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+            console.log('NTREE Report loaded successfully');
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Build artifacts
+deployment_build/
+dist/
+build/
+*.egg
+
+# NTREE Runtime/Output Files
+logs/
+assessments/
+engagements/
+scans/
+reports/
+*.log
+
+# Scope files (should be in templates/ or user-created)
+scope_*.txt
+test_scope*.txt
+!templates/scope_*.txt
+
+# Documentation (non-core)
+# Keep only README.md files, exclude all other markdown
+*.md
+!README.md
+!ntree-mcp-servers/README.md
+!ntree-autonomous/README.md
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local settings
+.claude/
+.env
+.env.local
+config.json
+!config.example.json
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+.cache/
+
+# Security sensitive files
+credentials/
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+
+# Test coverage
+htmlcov/
+.coverage
+coverage.xml
+*.cover
