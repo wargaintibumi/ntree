@@ -56,7 +56,8 @@ class NTREEAgentSDK:
     with full MCP server integration and tool use capabilities.
     """
 
-    def __init__(self, work_dir: str = None, assessment_id: str = None, verbose: bool = False):
+    def __init__(self, work_dir: str = None, assessment_id: str = None, verbose: bool = False,
+                 prescan_result: Dict = None):
         """
         Initialize NTREE autonomous agent with Claude SDK.
 
@@ -64,6 +65,7 @@ class NTREEAgentSDK:
             work_dir: Working directory for Claude sessions
             assessment_id: Custom assessment ID (default: auto-generated from timestamp)
             verbose: Show UserMessage and AssistantMessage contents
+            prescan_result: Pre-scan results dict from prescan.py
         """
         if not ClaudeSDKClient:
             raise ImportError("claude-code-sdk not installed. Install with: pip install claude-code-sdk")
@@ -73,6 +75,7 @@ class NTREEAgentSDK:
         self.prompts_dir = Path(__file__).parent / "prompts"
         self.assessment_id: Optional[str] = assessment_id
         self.verbose: bool = verbose
+        self.prescan_result: Optional[Dict] = prescan_result
         self.findings: List[Dict] = []
         self.discovered_hosts: List[str] = []
         self.current_phase: str = "init"
@@ -342,6 +345,9 @@ Work autonomously, make intelligent decisions, and provide actionable security f
         logger.info(f"Scope file: {scope_file}")
         logger.info(f"ROE file: {roe_file}")
         logger.info(f"Max iterations: {max_iterations}")
+        if self.prescan_result:
+            summary = self.prescan_result.get("summary", {})
+            logger.info(f"Prescan results: {summary.get('total_hosts', 0)} hosts, {summary.get('total_open_ports', 0)} ports")
 
         # Create session directory
         session_id = f"pentest_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -659,12 +665,36 @@ Call mcp__ntree-scan__scan_network NOW with the targets from your scope."""
         """
         assessment_id_line = f"Assessment ID: {self.assessment_id}" if self.assessment_id else "Assessment ID: (auto-generated)"
 
+        # Build prescan context if available
+        prescan_section = ""
+        if self.prescan_result and self.prescan_result.get("status") == "success":
+            summary = self.prescan_result.get("summary", {})
+            masscan_info = self.prescan_result.get("masscan", {})
+            nmap_info = self.prescan_result.get("nmap", {})
+
+            prescan_section = f"""
+
+## PRESCAN RESULTS AVAILABLE (USE THIS DATA)
+
+A prescan has already discovered live hosts in the target network:
+- Live hosts: {summary.get('total_hosts', 0)}
+- Open ports found: {summary.get('total_open_ports', 0)}
+- Services identified: {nmap_info.get('services_identified', 0)}
+- Live targets file: {self.prescan_result.get('live_targets_file', 'N/A')}
+
+IMPORTANT: The scope file has been updated to contain only live hosts discovered by the prescan.
+You can SKIP the initial network scanning phase and proceed directly to service enumeration.
+
+Use mcp__ntree-scope__init_assessment with the scope file (which now contains live targets).
+Then proceed directly to enumeration with mcp__ntree-enum__* tools.
+"""
+
         prompt = f"""Begin autonomous penetration test with the following parameters:
 
 Scope File: {scope_file}
 ROE File: {roe_file or 'None provided'}
 {assessment_id_line}
-
+{prescan_section}
 ⚠️  CRITICAL REQUIREMENT: You MUST use NTREE MCP tools (prefixed with mcp__ntree-*) for ALL security operations. DO NOT run bash commands for security tools like nmap, nuclei, hydra, etc.
 
 Your mission:
@@ -991,16 +1021,29 @@ async def main():
     parser.add_argument("--assessment-id", help="Custom assessment ID (default: auto-generated from timestamp)")
     parser.add_argument("--max-iterations", type=int, default=50, help="Maximum iterations")
     parser.add_argument("--work-dir", help="Working directory for sessions")
+    parser.add_argument("--prescan-result", help="Path to prescan_summary.json from prior prescan")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show UserMessage and AssistantMessage contents")
 
     args = parser.parse_args()
 
     try:
+        # Load prescan result if provided
+        prescan_result = None
+        if args.prescan_result:
+            prescan_path = Path(args.prescan_result)
+            if prescan_path.exists():
+                with open(prescan_path) as f:
+                    prescan_result = json.load(f)
+                logger.info(f"Loaded prescan result from {prescan_path}")
+            else:
+                logger.warning(f"Prescan result file not found: {prescan_path}")
+
         # Initialize agent
         agent = NTREEAgentSDK(
             work_dir=args.work_dir,
             assessment_id=args.assessment_id,
-            verbose=args.verbose
+            verbose=args.verbose,
+            prescan_result=prescan_result
         )
 
         # Run autonomous pentest

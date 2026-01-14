@@ -1,4 +1,4 @@
-# NTREE v2.0 - Neural Tactical Red-Team Exploitation Engine
+# NTREE v2.1 - Neural Tactical Red-Team Exploitation Engine
 
 **Claude Code Edition for Raspberry Pi 5**
 
@@ -36,6 +36,12 @@ NTREE executes **real security tools** via subprocess and generates **real repor
 ```
 ./start_pentest.sh --scope targets.txt
         ↓
+[PRESCAN - Enabled by Default]
+prescan.py            → Runs: masscan (fast port discovery)
+        ↓             → Runs: nmap -sV (service detection on discovered ports)
+        ↓             → Outputs: live_targets.txt with discovered hosts
+        ↓
+[AUTONOMOUS PENTEST - SDK Mode by Default]
 init_engagement()     → Creates engagement directory
         ↓
 scan_network()        → Runs: sudo nmap -sS -sV -O <targets>
@@ -209,6 +215,9 @@ Everything else works identically to Raspberry Pi OS.
 The easiest way to run NTREE is using the `start_pentest.sh` launcher:
 
 ```bash
+# Default: Prescan + SDK Mode (recommended)
+./start_pentest.sh --scope my_targets.txt
+
 # Interactive scope definition (guided setup)
 ./start_pentest.sh
 
@@ -220,6 +229,12 @@ nano my_targets.txt
 # View all options and examples
 ./start_pentest.sh --help
 ```
+
+**Default Settings (v2.1):**
+- **Prescan**: Enabled (fast host discovery with masscan + nmap)
+- **Mode**: SDK (uses Claude Code authentication)
+- **Prescan Ports**: Standard (~50 common ports)
+- **Prescan Rate**: 1000 packets/second
 
 ### Mode 1: Interactive with Claude Code (Recommended for Learning)
 
@@ -316,8 +331,8 @@ EXCLUDE 192.168.1.1        # Exclude from testing
 ### Quick Examples
 
 ```bash
-# Lab/CTF testing
-./start_pentest.sh --scope templates/scope_ctf_lab.txt --mode sdk
+# Lab/CTF testing (prescan + SDK mode - default)
+./start_pentest.sh --scope templates/scope_ctf_lab.txt
 
 # Corporate pentest with ROE
 ./start_pentest.sh --scope templates/scope_internal_network.txt \
@@ -325,7 +340,81 @@ EXCLUDE 192.168.1.1        # Exclude from testing
 
 # Automated overnight scan
 ./start_pentest.sh --scope my_targets.txt --iterations 200 --yes
+
+# Skip prescan for known live targets
+./start_pentest.sh --scope known_hosts.txt --no-prescan
+
+# Quick prescan with aggressive rate
+./start_pentest.sh --scope large_network.txt --prescan-ports quick --prescan-rate 5000
 ```
+
+---
+
+## 🔍 Prescan Feature
+
+NTREE includes a two-stage prescan that runs before the main penetration test to discover live hosts efficiently.
+
+### How Prescan Works
+
+```
+Scope File (CIDR ranges, IPs)
+        ↓
+Stage 1: Masscan (fast port discovery)
+  - Scans at 1000 packets/sec (configurable)
+  - Discovers open ports across all targets
+        ↓
+Stage 2: Nmap (service identification)
+  - Runs on discovered hosts only
+  - Parallel execution (5 hosts concurrently)
+  - Service version detection (-sV)
+        ↓
+Output: live_targets.txt
+  - Contains only hosts with open ports
+  - Passed to autonomous agent
+```
+
+### Prescan Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--prescan` | Enabled | Run prescan before pentest |
+| `--no-prescan` | - | Skip prescan (use original scope) |
+| `--prescan-ports` | standard | Port mode: quick, standard, full |
+| `--prescan-rate` | 1000 | Masscan packet rate (pps) |
+
+### Port Modes
+
+| Mode | Ports | Use Case |
+|------|-------|----------|
+| `quick` | ~20 common ports | Fast discovery, CTF |
+| `standard` | ~50 ports + databases | Balanced (default) |
+| `full` | 1-65535 | Thorough assessment |
+
+### Prescan Examples
+
+```bash
+# Default prescan (standard ports, 1000 pps)
+./start_pentest.sh --scope targets.txt
+
+# Quick prescan for CTF
+./start_pentest.sh --scope ctf.txt --prescan-ports quick
+
+# Full port scan (slower)
+./start_pentest.sh --scope target.txt --prescan-ports full
+
+# Aggressive rate for isolated networks
+./start_pentest.sh --scope lab.txt --prescan-rate 10000
+
+# Run prescan standalone
+python ntree-autonomous/prescan.py --scope targets.txt --ports standard
+```
+
+### Prescan Output
+
+Prescan generates files in `~/ntree/prescans/<timestamp>/`:
+- `prescan_summary.json` - Summary with timing and counts
+- `prescan_results.json` - Full results with all host/service data
+- `live_targets.txt` - Discovered hosts (used as new scope)
 
 ---
 
@@ -648,15 +737,18 @@ Special thanks to:
 - **Security**: security@example.com for security issues
 
 ### Status
-- Version: 2.0.0
+- Version: 2.1.0
 - Status: Beta
-- Last Updated: 2025-01-08
+- Last Updated: 2026-01-14
 
 ---
 
 ## 🗺️ Roadmap
 
-### v2.1 (Q1 2025)
+### v2.1 (Released)
+- [x] **Prescan feature** - Two-stage host discovery (masscan + nmap)
+- [x] **SDK mode as default** - Better MCP integration out of the box
+- [x] **Prescan options** - Configurable ports and rate
 - [ ] Web application testing enhancements
 - [ ] Cloud infrastructure support (AWS, Azure, GCP)
 - [ ] Container security testing

@@ -666,7 +666,8 @@ while maintaining strict safety controls and providing actionable remediation gu
             return {"status": "error", "error": str(e)}
 
     async def run_autonomous_pentest(self, scope_file: str, roe_file: str = "",
-                                     max_iterations: int = 50, assessment_id: str = "") -> Dict[str, Any]:
+                                     max_iterations: int = 50, assessment_id: str = "",
+                                     prescan_result: Optional[Dict] = None) -> Dict[str, Any]:
         """
         Run fully autonomous penetration test.
 
@@ -686,6 +687,31 @@ while maintaining strict safety controls and providing actionable remediation gu
         logger.info(f"ROE file: {roe_file}")
         logger.info(f"Assessment ID: {assessment_id or 'auto-generated'}")
         logger.info(f"Max iterations: {max_iterations}")
+        if prescan_result:
+            logger.info(f"Prescan results provided: {prescan_result.get('summary', {}).get('total_hosts', 0)} hosts")
+
+        # Build prescan context if available
+        prescan_context = ""
+        if prescan_result and prescan_result.get("status") == "success":
+            summary = prescan_result.get("summary", {})
+            masscan_info = prescan_result.get("masscan", {})
+            nmap_info = prescan_result.get("nmap", {})
+
+            prescan_context = f"""
+
+## PRESCAN RESULTS AVAILABLE (USE THIS DATA)
+
+A prescan has already been performed and discovered:
+- Live hosts: {summary.get('total_hosts', 0)}
+- Total open ports: {summary.get('total_open_ports', 0)}
+- Services identified: {nmap_info.get('services_identified', 0)}
+- Live targets file: {prescan_result.get('live_targets_file', 'N/A')}
+
+IMPORTANT: The scope file has been updated to contain only live hosts discovered by the prescan.
+You can skip the network discovery phase and proceed directly to service enumeration.
+
+Focus on the discovered hosts and ports rather than performing full network discovery from scratch.
+"""
 
         # Initial user message
         initial_message = f"""Begin autonomous penetration test with the following parameters:
@@ -693,7 +719,7 @@ while maintaining strict safety controls and providing actionable remediation gu
 Scope File: {scope_file}
 ROE File: {roe_file or 'None provided'}
 Assessment ID: {assessment_id or 'Will be auto-generated'}
-
+{prescan_context}
 Your mission:
 1. Initialize the assessment{f" with ID '{assessment_id}'" if assessment_id else ""}
 2. Conduct thorough reconnaissance
@@ -907,11 +933,23 @@ async def main():
     parser.add_argument("--assessment-id", default="", help="Custom assessment ID (optional)")
     parser.add_argument("--max-iterations", type=int, default=50, help="Maximum iterations")
     parser.add_argument("--api-key", help="Anthropic API key (or use ANTHROPIC_API_KEY env var)")
+    parser.add_argument("--prescan-result", help="Path to prescan_summary.json from prior prescan")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show UserMessage and AssistantMessage contents")
 
     args = parser.parse_args()
 
     try:
+        # Load prescan result if provided
+        prescan_result = None
+        if args.prescan_result:
+            prescan_path = Path(args.prescan_result)
+            if prescan_path.exists():
+                with open(prescan_path) as f:
+                    prescan_result = json.load(f)
+                logger.info(f"Loaded prescan result from {prescan_path}")
+            else:
+                logger.warning(f"Prescan result file not found: {prescan_path}")
+
         # Initialize agent
         agent = NTREEAgent(api_key=args.api_key, verbose=args.verbose)
 
@@ -920,7 +958,8 @@ async def main():
             scope_file=args.scope,
             roe_file=args.roe,
             max_iterations=args.max_iterations,
-            assessment_id=args.assessment_id
+            assessment_id=args.assessment_id,
+            prescan_result=prescan_result
         )
 
         print("\n" + "=" * 80)
