@@ -1,0 +1,66 @@
+# NTREE Wi-Fi Assessment Scope Template
+# This template enables wireless network and router security assessment
+#
+# IMPORTANT: Wi-Fi assessment requires:
+# 1. A secondary wireless adapter (e.g., wlan1) - NOT your primary interface
+# 2. Root privileges for monitor mode
+# 3. Explicit WIFI_ALLOWED directive below
+
+# =============================================================================
+# NETWORK SCOPE
+# =============================================================================
+
+# Target network ranges (IP-based scanning)
+192.168.1.0/24
+10.0.0.0/24
+
+# Specific router IPs for misconfiguration testing
+192.168.1.1
+
+# =============================================================================
+# WI-FI ASSESSMENT CONFIGURATION
+# =============================================================================
+
+# Enable Wi-Fi assessment (required for wireless scanning)
+WIFI_ALLOWED: true
+
+# Secondary wireless interface to use (MUST NOT be your primary/connected interface)
+# The system will verify this is not your default route interface
+WIFI_INTERFACE: wlan1
+
+# Optional: Restrict BSSID scope (use wildcards for OUI matching)
+# If not specified, all BSSIDs in range are in scope
+# Examples:
+# WIFI_BSSID_SCOPE: AA:BB:CC:*        # Match specific OUI
+# WIFI_BSSID_SCOPE: 00:11:22:33:44:55  # Match specific AP
+WIFI_BSSID_SCOPE: *
+
+# =============================================================================
+# EXCLUSIONS
+# =============================================================================
+
+# Exclude critical infrastructure from scanning
+EXCLUDE 192.168.1.254
+
+# Note: Local machine IPs are automatically excluded (self-IP protection)
+
+# =============================================================================
+# USAGE NOTES
+# =============================================================================
+#
+# Wi-Fi Tools Available (when WIFI_ALLOWED: true):
+# - scan_wireless_networks: Passive SSID/BSSID enumeration
+# - check_wifi_security: Encryption and WPS analysis
+# - detect_router_issues: Router misconfiguration detection
+# - check_vlan_segmentation: Network isolation testing
+#
+# Safety Controls:
+# - Cracking tools (aircrack, hashcat, reaver) are BLOCKED
+# - Deauthentication attacks are BLOCKED
+# - Credential testing requires explicit approval and is rate-limited
+# - Monitor mode is only enabled on secondary interface
+#
+# Example commands:
+# claude "scan wireless networks using wlan1"
+# claude "check security of network with BSSID AA:BB:CC:DD:EE:FF"
+# claude "detect router issues on 192.168.1.1 with approval"

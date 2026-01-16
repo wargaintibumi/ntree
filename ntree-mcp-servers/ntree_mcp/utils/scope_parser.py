@@ -3,13 +3,74 @@ Scope file parsing and IP validation
 Ensures all pentest actions stay within authorized boundaries
 """
 
+import fnmatch
 import ipaddress
 import re
-from typing import List, Set, Tuple
+import socket
+from typing import List, Set, Tuple, Optional
 from pathlib import Path
 from .logger import get_logger
 
+# Try to import netifaces for local IP detection
+try:
+    import netifaces
+    HAS_NETIFACES = True
+except ImportError:
+    HAS_NETIFACES = False
+
 logger = get_logger(__name__)
+
+
+def get_local_ips() -> Set[str]:
+    """
+    Get all IP addresses assigned to local interfaces.
+
+    Returns:
+        Set of local IP addresses as strings
+    """
+    local_ips = set()
+
+    # Always include localhost
+    local_ips.add('127.0.0.1')
+
+    if HAS_NETIFACES:
+        try:
+            for iface in netifaces.interfaces():
+                addrs = netifaces.ifaddresses(iface)
+                if netifaces.AF_INET in addrs:
+                    for addr in addrs[netifaces.AF_INET]:
+                        if 'addr' in addr:
+                            local_ips.add(addr['addr'])
+        except Exception as e:
+            logger.warning(f"Error getting local IPs via netifaces: {e}")
+    else:
+        # Fallback: use socket to get hostname-based IP
+        try:
+            hostname = socket.gethostname()
+            local_ips.add(socket.gethostbyname(hostname))
+        except Exception as e:
+            logger.warning(f"Error getting local IP via socket: {e}")
+
+    logger.debug(f"Detected local IPs: {local_ips}")
+    return local_ips
+
+
+def is_self_target(target: str, local_ips: Set[str]) -> bool:
+    """
+    Check if target IP matches any local interface.
+
+    Args:
+        target: Target IP address string
+        local_ips: Set of local IP addresses
+
+    Returns:
+        True if target is a local IP
+    """
+    try:
+        target_ip = ipaddress.ip_address(target)
+        return str(target_ip) in local_ips
+    except ValueError:
+        return False  # Not an IP, domain names pass through
 
 
 class ScopeValidator:
@@ -49,13 +110,28 @@ class ScopeValidator:
         self.excluded_ranges: List[ipaddress.IPv4Network] = []
         self.excluded_ips: Set[ipaddress.IPv4Address] = set()
 
+        # Wi-Fi assessment permissions
+        self.wifi_allowed: bool = False
+        self.wifi_interface: str = "wlan1"  # Default to secondary interface
+        self.wifi_bssid_scope: List[str] = []  # BSSID patterns (e.g., "AA:BB:CC:*")
+
+        # Self-IP protection: detect local IPs and auto-exclude
+        self._local_ips: Set[str] = get_local_ips()
+
         self._parse_scope_file()
 
         # Validate we have at least some targets
         if not (self.included_ranges or self.included_ips or self.included_domains):
             raise ValueError("Scope file contains no valid targets")
 
+        # Log Wi-Fi status if enabled
+        if self.wifi_allowed:
+            logger.info(f"Wi-Fi assessment ENABLED - interface: {self.wifi_interface}")
+            if self.wifi_bssid_scope:
+                logger.info(f"Wi-Fi BSSID scope: {self.wifi_bssid_scope}")
+
         logger.info(f"Scope loaded: {self.get_scope_summary()}")
+        logger.info(f"Self-IP protection: {len(self._local_ips)} local IPs auto-excluded")
 
     def _parse_scope_file(self):
         """Parse scope file and populate inclusion/exclusion lists."""
@@ -70,8 +146,31 @@ class ScopeValidator:
                     continue
 
                 try:
+                    # Handle Wi-Fi directives
+                    line_upper = line.upper()
+
+                    if line_upper.startswith('WIFI_ALLOWED:'):
+                        value = line.split(':', 1)[1].strip().lower()
+                        self.wifi_allowed = value in ['true', 'yes', '1']
+                        logger.debug(f"Wi-Fi allowed: {self.wifi_allowed}")
+                        continue
+
+                    if line_upper.startswith('WIFI_INTERFACE:'):
+                        value = line.split(':', 1)[1].strip()
+                        if value:
+                            self.wifi_interface = value
+                        logger.debug(f"Wi-Fi interface: {self.wifi_interface}")
+                        continue
+
+                    if line_upper.startswith('WIFI_BSSID_SCOPE:'):
+                        pattern = line.split(':', 1)[1].strip()
+                        if pattern:
+                            self.wifi_bssid_scope.append(pattern.upper())
+                        logger.debug(f"Wi-Fi BSSID scope pattern: {pattern}")
+                        continue
+
                     # Handle exclusions
-                    if line.upper().startswith('EXCLUDE'):
+                    if line_upper.startswith('EXCLUDE'):
                         # Remove 'EXCLUDE' prefix
                         target = line.split(maxsplit=1)[1] if len(line.split()) > 1 else ""
                         if target:
@@ -140,6 +239,11 @@ class ScopeValidator:
         Returns:
             Tuple of (in_scope: bool, reason: str)
         """
+        # Self-IP protection: block targeting own machine
+        if is_self_target(target, self._local_ips):
+            logger.warning(f"BLOCKED: Attempted to target own machine: {target}")
+            return False, f"BLOCKED: Cannot target own machine ({target})"
+
         # Try as IP address first
         try:
             ip = ipaddress.IPv4Address(target)
@@ -193,6 +297,47 @@ class ScopeValidator:
 
         return False, f"Domain {domain} is not in scope"
 
+    def is_bssid_in_scope(self, bssid: str) -> Tuple[bool, str]:
+        """
+        Check if a BSSID is in Wi-Fi scope.
+
+        Args:
+            bssid: BSSID (MAC address) to check
+
+        Returns:
+            Tuple of (in_scope: bool, reason: str)
+        """
+        # First check if Wi-Fi is allowed at all
+        if not self.wifi_allowed:
+            return False, "Wi-Fi assessment not allowed (WIFI_ALLOWED not set)"
+
+        # Normalize BSSID to uppercase
+        bssid = bssid.upper().strip()
+
+        # Validate BSSID format
+        if not re.match(r'^([0-9A-F]{2}:){5}[0-9A-F]{2}$', bssid):
+            return False, f"Invalid BSSID format: {bssid}"
+
+        # If no BSSID scope patterns defined, all BSSIDs are in scope
+        if not self.wifi_bssid_scope:
+            return True, "No BSSID restrictions (all in scope)"
+
+        # Check against BSSID patterns
+        for pattern in self.wifi_bssid_scope:
+            if fnmatch.fnmatch(bssid, pattern):
+                return True, f"BSSID {bssid} matches pattern {pattern}"
+
+        return False, f"BSSID {bssid} not in Wi-Fi scope"
+
+    def get_local_ips(self) -> Set[str]:
+        """
+        Get detected local IP addresses.
+
+        Returns:
+            Set of local IP address strings
+        """
+        return self._local_ips.copy()
+
     def get_all_targets(self) -> List[str]:
         """
         Get all explicitly defined targets.
@@ -220,6 +365,10 @@ class ScopeValidator:
             "excluded_ranges": len(self.excluded_ranges),
             "excluded_ips": len(self.excluded_ips),
             "total_targets": len(self.get_all_targets()),
+            "wifi_allowed": self.wifi_allowed,
+            "wifi_interface": self.wifi_interface if self.wifi_allowed else None,
+            "wifi_bssid_patterns": len(self.wifi_bssid_scope),
+            "local_ips_protected": len(self._local_ips),
         }
 
     def validate_multiple(self, targets: List[str]) -> dict:

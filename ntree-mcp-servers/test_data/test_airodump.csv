@@ -1,0 +1,8 @@
+
+BSSID, First time seen, Last time seen, channel, Speed, Privacy, Cipher, Authentication, Power, # beacons, # IV, LAN IP, ID-length, ESSID, Key
+
+AA:BB:CC:DD:EE:FF, 2024-01-01 12:00:00, 2024-01-01 12:05:00,  6,  54, WPA2 WPA, CCMP TKIP, PSK, -50,      100,        0, 0.  0.  0.  0, 10, TestNetwork,
+11:22:33:44:55:66, 2024-01-01 12:00:00, 2024-01-01 12:05:00, 11,  54, WEP,      WEP,      , -70,       50,        0, 0.  0.  0.  0,  8, WeakWEP,
+00:11:22:33:44:55, 2024-01-01 12:00:00, 2024-01-01 12:05:00,  1,  54, OPN,      ,         , -40,      200,        0, 0.  0.  0.  0,  6, OpenNet,
+
+Station MAC, First time seen, Last time seen, Power, # packets, BSSID, Probed ESSIDs

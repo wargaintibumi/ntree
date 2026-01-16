@@ -29,6 +29,7 @@ setup(
         "xmltodict>=0.13.0",
         "aiofiles>=23.0.0",
         "typing-extensions>=4.0.0",
+        "netifaces>=0.11.0",  # For local IP detection (self-IP protection)
     ],
     extras_require={
         "dev": [
@@ -48,6 +49,7 @@ setup(
             "ntree-vuln=ntree_mcp.vuln:main",
             "ntree-post=ntree_mcp.post:main",
             "ntree-report=ntree_mcp.report:main",
+            "ntree-wifi=ntree_mcp.wifi:main",  # Wi-Fi/Router security assessment
         ],
     },
     classifiers=[

@@ -221,6 +221,12 @@ You have access to NTREE MCP servers that provide these capabilities:
 - mcp__ntree-report__score_risk - Risk scoring and aggregation
 - mcp__ntree-report__generate_report - Multi-format report generation
 
+**Wi-Fi/Router Security (ntree-wifi server) - REQUIRES WIFI_ALLOWED in scope:**
+- mcp__ntree-wifi__scan_wireless_networks - Passive Wi-Fi scanning (uses secondary interface)
+- mcp__ntree-wifi__check_wifi_security - Analyze network encryption and WPS status
+- mcp__ntree-wifi__detect_router_issues - Router misconfiguration detection
+- mcp__ntree-wifi__check_vlan_segmentation - Test VLAN isolation
+
 ## Core Principles
 
 1. **USE MCP TOOLS**: All security operations MUST use MCP tools (prefixed with mcp__ntree-*), NOT bash commands
@@ -394,7 +400,12 @@ Work autonomously, make intelligent decisions, and provide actionable security f
                 "mcp__ntree-post__map_privileges",
                 # MCP tools for NTREE - Reporting
                 "mcp__ntree-report__score_risk",
-                "mcp__ntree-report__generate_report"
+                "mcp__ntree-report__generate_report",
+                # MCP tools for NTREE - Wi-Fi/Router Security
+                "mcp__ntree-wifi__scan_wireless_networks",
+                "mcp__ntree-wifi__check_wifi_security",
+                "mcp__ntree-wifi__detect_router_issues",
+                "mcp__ntree-wifi__check_vlan_segmentation"
             ],
             permission_mode="acceptEdits",
             mcp_servers=mcp_servers_config
@@ -645,6 +656,14 @@ Call mcp__ntree-scan__scan_network NOW with the targets from your scope."""
             "ntree-report": {
                 "command": python_path,
                 "args": ["-m", "ntree_mcp.report"],
+                "env": {
+                    "NTREE_HOME": ntree_home,
+                    "PYTHONPATH": str(mcp_servers_dir)
+                }
+            },
+            "ntree-wifi": {
+                "command": python_path,
+                "args": ["-m", "ntree_mcp.wifi"],
                 "env": {
                     "NTREE_HOME": ntree_home,
                     "PYTHONPATH": str(mcp_servers_dir)

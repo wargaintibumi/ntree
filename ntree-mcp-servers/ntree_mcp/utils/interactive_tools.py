@@ -110,6 +110,49 @@ INTERACTIVE_TOOLS = {
         "safe_flags": ["-no-pass", "-hashes"],
         "prompts_for": ["password"]
     },
+    # Wi-Fi/Wireless tools
+    "airmon-ng": {
+        "description": "Wireless interface monitor mode manager",
+        "interactive_without": [],
+        "safe_flags": ["start", "stop", "check", "--verbose"],
+        "prompts_for": []  # Non-interactive with proper subcommands
+    },
+    "airodump-ng": {
+        "description": "Wireless network scanner",
+        "interactive_without": ["requires_ctrl_c"],
+        "safe_flags": ["--write", "-w", "--output-format"],
+        "prompts_for": []  # Requires Ctrl+C to stop, use timeout wrapper
+    },
+    "wash": {
+        "description": "WPS scanner",
+        "interactive_without": [],
+        "safe_flags": ["-i", "-C", "-s"],
+        "prompts_for": []  # Non-interactive
+    },
+    "aireplay-ng": {
+        "description": "Wireless injection tool (BLOCKED - deauth attacks)",
+        "interactive_without": ["always_blocked"],
+        "safe_flags": [],
+        "prompts_for": ["deauth", "injection"]
+    },
+    "aircrack-ng": {
+        "description": "Wireless key cracker (BLOCKED)",
+        "interactive_without": ["always_blocked"],
+        "safe_flags": [],
+        "prompts_for": ["cracking"]
+    },
+    "reaver": {
+        "description": "WPS brute force tool (BLOCKED)",
+        "interactive_without": ["always_blocked"],
+        "safe_flags": [],
+        "prompts_for": ["brute force"]
+    },
+    "bully": {
+        "description": "WPS brute force tool (BLOCKED)",
+        "interactive_without": ["always_blocked"],
+        "safe_flags": [],
+        "prompts_for": ["brute force"]
+    },
 }
 
 

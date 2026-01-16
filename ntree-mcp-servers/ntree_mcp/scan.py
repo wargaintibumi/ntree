@@ -155,6 +155,51 @@ class MasscanNmapArgs(BaseModel):
     )
 
 
+# ============================================================================
+# Perimeter Discovery Tool Arguments
+# ============================================================================
+
+class DetectVPNEndpointsArgs(BaseModel):
+    """Arguments for detect_vpn_endpoints tool."""
+    targets: str = Field(description="Target IPs or CIDR ranges (comma-separated)")
+    vpn_types: list = Field(
+        default=["openvpn", "ipsec", "wireguard", "sstp", "l2tp"],
+        description="VPN types to detect: openvpn, ipsec, wireguard, sstp, l2tp"
+    )
+    timeout: int = Field(default=300, description="Scan timeout in seconds (max 600)")
+
+
+class DetectMailServersArgs(BaseModel):
+    """Arguments for detect_mail_servers tool."""
+    targets: str = Field(description="Target IPs or CIDR ranges (comma-separated)")
+    protocols: list = Field(
+        default=["smtp", "imap", "pop3"],
+        description="Mail protocols: smtp, smtps, imap, imaps, pop3, pop3s"
+    )
+    enumerate_users: bool = Field(
+        default=False,
+        description="Attempt VRFY/EXPN user enumeration (noisy, may be logged)"
+    )
+
+
+class DetectADServicesArgs(BaseModel):
+    """Arguments for detect_ad_services tool."""
+    targets: str = Field(description="Target IPs or CIDR ranges (comma-separated)")
+    deep_scan: bool = Field(
+        default=False,
+        description="Perform deep Kerberos/LDAP enumeration (slower but more comprehensive)"
+    )
+
+
+class DetectGatewaysArgs(BaseModel):
+    """Arguments for detect_gateways tool."""
+    targets: str = Field(description="Target IPs or CIDR ranges (comma-separated)")
+    gateway_types: list = Field(
+        default=["web", "proxy", "load_balancer", "waf"],
+        description="Gateway types: web, proxy, load_balancer, waf, api_gateway"
+    )
+
+
 # Input validation functions to prevent command injection
 def validate_ip_or_cidr(target: str) -> bool:
     """Validate IP address or CIDR range."""
@@ -261,6 +306,27 @@ async def list_tools() -> list[Tool]:
             description="Two-stage comprehensive scan: masscan for fast host/port discovery, then nmap for deep vulnerability analysis",
             inputSchema=MasscanNmapArgs.model_json_schema()
         ),
+        # Perimeter Discovery Tools
+        Tool(
+            name="detect_vpn_endpoints",
+            description="Detect VPN services (OpenVPN, IPSec, WireGuard, SSTP, L2TP) on target networks for perimeter mapping",
+            inputSchema=DetectVPNEndpointsArgs.model_json_schema()
+        ),
+        Tool(
+            name="detect_mail_servers",
+            description="Detect mail infrastructure (SMTP, IMAP, POP3) and check for misconfigurations like open relays",
+            inputSchema=DetectMailServersArgs.model_json_schema()
+        ),
+        Tool(
+            name="detect_ad_services",
+            description="Detect Active Directory services (Kerberos, LDAP, DNS) for domain controller identification",
+            inputSchema=DetectADServicesArgs.model_json_schema()
+        ),
+        Tool(
+            name="detect_gateways",
+            description="Detect web gateways, proxies, load balancers, and WAFs through HTTP header and response analysis",
+            inputSchema=DetectGatewaysArgs.model_json_schema()
+        ),
     ]
 
 
@@ -318,6 +384,41 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
                 args.masscan_rate,
                 args.nmap_intensity,
                 args.skip_vuln_scripts
+            )
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        # Perimeter Discovery Tools
+        elif name == "detect_vpn_endpoints":
+            args = DetectVPNEndpointsArgs(**arguments)
+            result = await detect_vpn_endpoints(
+                args.targets,
+                args.vpn_types,
+                args.timeout
+            )
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "detect_mail_servers":
+            args = DetectMailServersArgs(**arguments)
+            result = await detect_mail_servers(
+                args.targets,
+                args.protocols,
+                args.enumerate_users
+            )
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "detect_ad_services":
+            args = DetectADServicesArgs(**arguments)
+            result = await detect_ad_services(
+                args.targets,
+                args.deep_scan
+            )
+            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+        elif name == "detect_gateways":
+            args = DetectGatewaysArgs(**arguments)
+            result = await detect_gateways(
+                args.targets,
+                args.gateway_types
             )
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
@@ -1294,6 +1395,658 @@ def _estimate_severity(script_id: str, output: str) -> str:
         return 'medium'
 
     return 'low'
+
+
+# ============================================================================
+# Perimeter Discovery Functions
+# ============================================================================
+
+async def detect_vpn_endpoints(
+    targets: str,
+    vpn_types: list = None,
+    timeout: int = 300
+) -> dict:
+    """
+    Detect VPN endpoints on target networks.
+
+    Args:
+        targets: Target IPs or CIDR ranges
+        vpn_types: VPN types to detect (openvpn, ipsec, wireguard, sstp, l2tp)
+        timeout: Scan timeout in seconds
+
+    Returns:
+        {
+            "status": "success",
+            "vpn_endpoints": [...],
+            "summary": "..."
+        }
+    """
+    try:
+        if vpn_types is None:
+            vpn_types = ["openvpn", "ipsec", "wireguard", "sstp", "l2tp"]
+
+        logger.info(f"Starting VPN detection: targets={targets}, types={vpn_types}")
+
+        # Validate inputs
+        try:
+            targets = validate_targets(targets)
+        except ValueError as e:
+            return {"status": "error", "error": f"Invalid targets: {e}"}
+
+        # Validate timeout
+        timeout = min(max(timeout, 60), 600)
+
+        # VPN port and protocol mappings
+        vpn_config = {
+            "openvpn": {
+                "ports": "1194,443",
+                "protocols": "tcp,udp",
+                "scripts": "openvpn-info",
+                "description": "OpenVPN"
+            },
+            "ipsec": {
+                "ports": "500,4500",
+                "protocols": "udp",
+                "scripts": "ike-version",
+                "description": "IPSec/IKE"
+            },
+            "wireguard": {
+                "ports": "51820",
+                "protocols": "udp",
+                "scripts": "",
+                "description": "WireGuard"
+            },
+            "sstp": {
+                "ports": "443",
+                "protocols": "tcp",
+                "scripts": "http-headers",
+                "description": "SSTP VPN"
+            },
+            "l2tp": {
+                "ports": "1701",
+                "protocols": "udp",
+                "scripts": "",
+                "description": "L2TP"
+            }
+        }
+
+        vpn_endpoints = []
+        scan_results = {}
+
+        for vpn_type in vpn_types:
+            if vpn_type not in vpn_config:
+                logger.warning(f"Unknown VPN type: {vpn_type}")
+                continue
+
+            config = vpn_config[vpn_type]
+            logger.info(f"Scanning for {config['description']} on ports {config['ports']}")
+
+            # Build nmap command
+            import uuid
+            xml_output = Path(f"/tmp/vpn_scan_{uuid.uuid4()}.xml")
+
+            try:
+                # Determine scan flags based on protocol
+                if config["protocols"] == "udp":
+                    scan_flags = "-sU"
+                elif config["protocols"] == "tcp":
+                    scan_flags = "-sS"
+                else:
+                    scan_flags = "-sS -sU"
+
+                cmd_parts = [
+                    "sudo", "nmap", scan_flags,
+                    "-sV", "--version-intensity", "5",
+                    "-p", shlex.quote(config["ports"]),
+                    "-T4", "--open"
+                ]
+
+                if config["scripts"]:
+                    cmd_parts.extend(["--script", config["scripts"]])
+
+                cmd_parts.extend(["-oX", shlex.quote(str(xml_output))])
+                cmd_parts.append(shlex.quote(targets))
+
+                command = " ".join(cmd_parts)
+
+                returncode, stdout, stderr = await run_command(command, timeout=timeout)
+
+                if returncode == 0 and xml_output.exists():
+                    scan_result = parse_nmap_xml(str(xml_output))
+                    scan_results[vpn_type] = scan_result
+
+                    # Extract VPN endpoints from results
+                    for host in scan_result.get("hosts", []):
+                        for service in host.get("services", []):
+                            if service.get("state") == "open":
+                                endpoint = {
+                                    "ip": host.get("ip"),
+                                    "port": service.get("port"),
+                                    "protocol": service.get("protocol", "tcp"),
+                                    "vpn_type": vpn_type,
+                                    "vpn_name": config["description"],
+                                    "service": service.get("service", "unknown"),
+                                    "version": service.get("version", ""),
+                                    "product": service.get("product", ""),
+                                    "scripts": service.get("scripts", [])
+                                }
+                                vpn_endpoints.append(endpoint)
+
+            finally:
+                if xml_output.exists():
+                    xml_output.unlink()
+
+        # Generate summary
+        vpn_type_counts = {}
+        for ep in vpn_endpoints:
+            vt = ep["vpn_type"]
+            vpn_type_counts[vt] = vpn_type_counts.get(vt, 0) + 1
+
+        summary = f"VPN detection complete: {len(vpn_endpoints)} endpoints found"
+        if vpn_type_counts:
+            summary += " - " + ", ".join(f"{k}: {v}" for k, v in vpn_type_counts.items())
+
+        logger.info(summary)
+
+        return {
+            "status": "success",
+            "vpn_endpoints": vpn_endpoints,
+            "total_endpoints": len(vpn_endpoints),
+            "by_type": vpn_type_counts,
+            "summary": summary
+        }
+
+    except Exception as e:
+        logger.error(f"Error during VPN detection: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+async def detect_mail_servers(
+    targets: str,
+    protocols: list = None,
+    enumerate_users: bool = False
+) -> dict:
+    """
+    Detect mail servers on target networks.
+
+    Args:
+        targets: Target IPs or CIDR ranges
+        protocols: Mail protocols to detect
+        enumerate_users: Attempt VRFY/EXPN enumeration
+
+    Returns:
+        {
+            "status": "success",
+            "mail_servers": [...],
+            "misconfigurations": [...],
+            "summary": "..."
+        }
+    """
+    try:
+        if protocols is None:
+            protocols = ["smtp", "imap", "pop3"]
+
+        logger.info(f"Starting mail server detection: targets={targets}, protocols={protocols}")
+
+        # Validate inputs
+        try:
+            targets = validate_targets(targets)
+        except ValueError as e:
+            return {"status": "error", "error": f"Invalid targets: {e}"}
+
+        # Mail protocol configurations
+        mail_config = {
+            "smtp": {"ports": "25", "scripts": "smtp-commands,smtp-open-relay"},
+            "smtps": {"ports": "465", "scripts": "smtp-commands"},
+            "submission": {"ports": "587", "scripts": "smtp-commands"},
+            "imap": {"ports": "143", "scripts": "imap-capabilities"},
+            "imaps": {"ports": "993", "scripts": "imap-capabilities"},
+            "pop3": {"ports": "110", "scripts": "pop3-capabilities"},
+            "pop3s": {"ports": "995", "scripts": "pop3-capabilities"}
+        }
+
+        # Collect all ports to scan
+        ports_to_scan = set()
+        scripts_to_run = set()
+
+        for protocol in protocols:
+            if protocol in mail_config:
+                ports_to_scan.add(mail_config[protocol]["ports"])
+                for script in mail_config[protocol]["scripts"].split(","):
+                    scripts_to_run.add(script)
+            # Handle base protocol names that include secure variants
+            if protocol == "smtp":
+                ports_to_scan.update(["25", "465", "587"])
+            elif protocol == "imap":
+                ports_to_scan.update(["143", "993"])
+            elif protocol == "pop3":
+                ports_to_scan.update(["110", "995"])
+
+        port_string = ",".join(sorted(ports_to_scan))
+        script_string = ",".join(sorted(scripts_to_run))
+
+        if enumerate_users:
+            script_string += ",smtp-enum-users"
+
+        # Run nmap scan
+        import uuid
+        xml_output = Path(f"/tmp/mail_scan_{uuid.uuid4()}.xml")
+
+        try:
+            cmd_parts = [
+                "sudo", "nmap", "-sS", "-sV",
+                "--version-intensity", "5",
+                "-p", shlex.quote(port_string),
+                "--script", shlex.quote(script_string),
+                "-T4", "--open",
+                "-oX", shlex.quote(str(xml_output)),
+                shlex.quote(targets)
+            ]
+
+            command = " ".join(cmd_parts)
+            returncode, stdout, stderr = await run_command(command, timeout=600)
+
+            mail_servers = []
+            misconfigurations = []
+
+            if returncode == 0 and xml_output.exists():
+                scan_result = parse_nmap_xml(str(xml_output))
+
+                for host in scan_result.get("hosts", []):
+                    host_ip = host.get("ip")
+
+                    for service in host.get("services", []):
+                        if service.get("state") != "open":
+                            continue
+
+                        port = service.get("port")
+                        service_name = service.get("service", "unknown")
+
+                        # Determine protocol type
+                        protocol_type = "unknown"
+                        if port in [25, 465, 587]:
+                            protocol_type = "smtp"
+                        elif port in [143, 993]:
+                            protocol_type = "imap"
+                        elif port in [110, 995]:
+                            protocol_type = "pop3"
+
+                        server_info = {
+                            "ip": host_ip,
+                            "port": port,
+                            "protocol": protocol_type,
+                            "service": service_name,
+                            "product": service.get("product", ""),
+                            "version": service.get("version", ""),
+                            "ssl": port in [465, 993, 995],
+                            "scripts": service.get("scripts", [])
+                        }
+                        mail_servers.append(server_info)
+
+                        # Check for misconfigurations
+                        for script in service.get("scripts", []):
+                            script_output = script.get("output", "").lower()
+
+                            # Check for open relay
+                            if "open-relay" in script.get("id", "") and "vulnerable" in script_output:
+                                misconfigurations.append({
+                                    "ip": host_ip,
+                                    "port": port,
+                                    "type": "open_relay",
+                                    "severity": "critical",
+                                    "description": "SMTP open relay detected - can be abused for spam"
+                                })
+
+                            # Check for VRFY/EXPN enabled
+                            if "vrfy" in script_output or "expn" in script_output:
+                                misconfigurations.append({
+                                    "ip": host_ip,
+                                    "port": port,
+                                    "type": "user_enumeration",
+                                    "severity": "medium",
+                                    "description": "VRFY/EXPN commands enabled - allows user enumeration"
+                                })
+
+            # Generate summary
+            summary = f"Mail detection complete: {len(mail_servers)} servers, {len(misconfigurations)} misconfigurations"
+
+            logger.info(summary)
+
+            return {
+                "status": "success",
+                "mail_servers": mail_servers,
+                "total_servers": len(mail_servers),
+                "misconfigurations": misconfigurations,
+                "summary": summary
+            }
+
+        finally:
+            if xml_output.exists():
+                xml_output.unlink()
+
+    except Exception as e:
+        logger.error(f"Error during mail server detection: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+async def detect_ad_services(
+    targets: str,
+    deep_scan: bool = False
+) -> dict:
+    """
+    Detect Active Directory services on target networks.
+
+    Args:
+        targets: Target IPs or CIDR ranges
+        deep_scan: Perform deep enumeration
+
+    Returns:
+        {
+            "status": "success",
+            "domain_controllers": [...],
+            "ad_services": [...],
+            "summary": "..."
+        }
+    """
+    try:
+        logger.info(f"Starting AD service detection: targets={targets}, deep_scan={deep_scan}")
+
+        # Validate inputs
+        try:
+            targets = validate_targets(targets)
+        except ValueError as e:
+            return {"status": "error", "error": f"Invalid targets: {e}"}
+
+        # AD-related ports
+        ad_ports = "53,88,135,139,389,445,464,636,3268,3269"
+
+        # NSE scripts for AD detection
+        base_scripts = "smb-os-discovery,ldap-rootdse,dns-srv-enum"
+        if deep_scan:
+            base_scripts += ",krb5-enum-users,ldap-search,smb-enum-domains"
+
+        # Run nmap scan
+        import uuid
+        xml_output = Path(f"/tmp/ad_scan_{uuid.uuid4()}.xml")
+
+        try:
+            cmd_parts = [
+                "sudo", "nmap", "-sS", "-sU", "-sV",
+                "--version-intensity", "5",
+                "-p", f"T:{ad_ports},U:53,88,389",
+                "--script", shlex.quote(base_scripts),
+                "-T4", "--open",
+                "-oX", shlex.quote(str(xml_output)),
+                shlex.quote(targets)
+            ]
+
+            command = " ".join(cmd_parts)
+            timeout = 900 if deep_scan else 600
+
+            returncode, stdout, stderr = await run_command(command, timeout=timeout)
+
+            domain_controllers = []
+            ad_services = []
+
+            if returncode == 0 and xml_output.exists():
+                scan_result = parse_nmap_xml(str(xml_output))
+
+                for host in scan_result.get("hosts", []):
+                    host_ip = host.get("ip")
+                    is_dc = False
+                    domain_info = {}
+
+                    services_found = []
+
+                    for service in host.get("services", []):
+                        if service.get("state") != "open":
+                            continue
+
+                        port = service.get("port")
+                        service_name = service.get("service", "unknown")
+
+                        # Identify AD-related services
+                        ad_service = None
+                        if port == 88:
+                            ad_service = "kerberos"
+                            is_dc = True
+                        elif port == 389:
+                            ad_service = "ldap"
+                        elif port == 636:
+                            ad_service = "ldaps"
+                        elif port == 3268:
+                            ad_service = "global_catalog"
+                            is_dc = True
+                        elif port == 3269:
+                            ad_service = "global_catalog_ssl"
+                            is_dc = True
+                        elif port == 445:
+                            ad_service = "smb"
+                        elif port == 53:
+                            ad_service = "dns"
+
+                        if ad_service:
+                            service_info = {
+                                "ip": host_ip,
+                                "port": port,
+                                "service": ad_service,
+                                "product": service.get("product", ""),
+                                "version": service.get("version", "")
+                            }
+                            services_found.append(service_info)
+                            ad_services.append(service_info)
+
+                        # Extract domain info from scripts
+                        for script in service.get("scripts", []):
+                            script_id = script.get("id", "")
+                            script_output = script.get("output", "")
+
+                            if "smb-os-discovery" in script_id:
+                                # Parse domain info
+                                if "Domain:" in script_output:
+                                    for line in script_output.split("\n"):
+                                        if "Domain:" in line:
+                                            domain_info["domain"] = line.split(":")[-1].strip()
+                                        elif "FQDN:" in line:
+                                            domain_info["fqdn"] = line.split(":")[-1].strip()
+                                        elif "Forest:" in line:
+                                            domain_info["forest"] = line.split(":")[-1].strip()
+
+                            if "ldap-rootdse" in script_id:
+                                if "defaultNamingContext" in script_output:
+                                    is_dc = True
+
+                    if is_dc:
+                        dc_info = {
+                            "ip": host_ip,
+                            "hostname": host.get("hostname", ""),
+                            "services": services_found,
+                            "domain_info": domain_info
+                        }
+                        domain_controllers.append(dc_info)
+
+            # Generate summary
+            summary = f"AD detection complete: {len(domain_controllers)} domain controllers, {len(ad_services)} AD services"
+
+            logger.info(summary)
+
+            return {
+                "status": "success",
+                "domain_controllers": domain_controllers,
+                "ad_services": ad_services,
+                "total_dcs": len(domain_controllers),
+                "total_services": len(ad_services),
+                "summary": summary
+            }
+
+        finally:
+            if xml_output.exists():
+                xml_output.unlink()
+
+    except Exception as e:
+        logger.error(f"Error during AD service detection: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+async def detect_gateways(
+    targets: str,
+    gateway_types: list = None
+) -> dict:
+    """
+    Detect web gateways, proxies, load balancers, and WAFs.
+
+    Args:
+        targets: Target IPs or CIDR ranges
+        gateway_types: Types to detect (web, proxy, load_balancer, waf)
+
+    Returns:
+        {
+            "status": "success",
+            "gateways": [...],
+            "summary": "..."
+        }
+    """
+    try:
+        if gateway_types is None:
+            gateway_types = ["web", "proxy", "load_balancer", "waf"]
+
+        logger.info(f"Starting gateway detection: targets={targets}, types={gateway_types}")
+
+        # Validate inputs
+        try:
+            targets = validate_targets(targets)
+        except ValueError as e:
+            return {"status": "error", "error": f"Invalid targets: {e}"}
+
+        # Common web ports
+        web_ports = "80,443,8080,8443,8000,8888"
+
+        # Run nmap scan for web services
+        import uuid
+        xml_output = Path(f"/tmp/gateway_scan_{uuid.uuid4()}.xml")
+
+        gateways = []
+
+        try:
+            cmd_parts = [
+                "sudo", "nmap", "-sS", "-sV",
+                "--version-intensity", "5",
+                "-p", shlex.quote(web_ports),
+                "--script", "http-headers,http-server-header",
+                "-T4", "--open",
+                "-oX", shlex.quote(str(xml_output)),
+                shlex.quote(targets)
+            ]
+
+            command = " ".join(cmd_parts)
+            returncode, stdout, stderr = await run_command(command, timeout=600)
+
+            if returncode == 0 and xml_output.exists():
+                scan_result = parse_nmap_xml(str(xml_output))
+
+                for host in scan_result.get("hosts", []):
+                    host_ip = host.get("ip")
+
+                    for service in host.get("services", []):
+                        if service.get("state") != "open":
+                            continue
+
+                        port = service.get("port")
+
+                        # Analyze HTTP headers for gateway indicators
+                        gateway_info = {
+                            "ip": host_ip,
+                            "port": port,
+                            "service": service.get("service", "http"),
+                            "product": service.get("product", ""),
+                            "version": service.get("version", ""),
+                            "gateway_types": [],
+                            "indicators": []
+                        }
+
+                        for script in service.get("scripts", []):
+                            script_output = script.get("output", "")
+                            script_lower = script_output.lower()
+
+                            # Proxy indicators
+                            if "proxy" in gateway_types:
+                                proxy_headers = ["via:", "x-forwarded-for:", "x-proxy", "proxy-connection"]
+                                for header in proxy_headers:
+                                    if header in script_lower:
+                                        if "proxy" not in gateway_info["gateway_types"]:
+                                            gateway_info["gateway_types"].append("proxy")
+                                        gateway_info["indicators"].append(f"Header: {header}")
+
+                            # Load balancer indicators
+                            if "load_balancer" in gateway_types:
+                                lb_indicators = ["x-served-by", "x-backend", "x-upstream", "x-amz-cf", "x-cache"]
+                                for indicator in lb_indicators:
+                                    if indicator in script_lower:
+                                        if "load_balancer" not in gateway_info["gateway_types"]:
+                                            gateway_info["gateway_types"].append("load_balancer")
+                                        gateway_info["indicators"].append(f"Header: {indicator}")
+
+                            # WAF indicators
+                            if "waf" in gateway_types:
+                                waf_signatures = {
+                                    "cloudflare": ["cf-ray", "cloudflare"],
+                                    "akamai": ["akamai", "x-akamai"],
+                                    "aws_waf": ["x-amzn-waf", "awselb"],
+                                    "f5_bigip": ["bigip", "f5"],
+                                    "imperva": ["incap", "imperva"],
+                                    "sucuri": ["sucuri", "x-sucuri"],
+                                    "modsecurity": ["modsecurity", "mod_security"],
+                                    "barracuda": ["barracuda"]
+                                }
+
+                                for waf_name, signatures in waf_signatures.items():
+                                    for sig in signatures:
+                                        if sig in script_lower:
+                                            if "waf" not in gateway_info["gateway_types"]:
+                                                gateway_info["gateway_types"].append("waf")
+                                            gateway_info["indicators"].append(f"WAF: {waf_name}")
+                                            break
+
+                            # Web server/gateway products
+                            if "web" in gateway_types:
+                                web_products = ["nginx", "apache", "haproxy", "traefik", "envoy", "istio"]
+                                for product in web_products:
+                                    if product in script_lower or product in service.get("product", "").lower():
+                                        if "web" not in gateway_info["gateway_types"]:
+                                            gateway_info["gateway_types"].append("web")
+                                        gateway_info["indicators"].append(f"Server: {product}")
+
+                        # Only add if we found gateway indicators
+                        if gateway_info["gateway_types"] or gateway_info["indicators"]:
+                            gateways.append(gateway_info)
+
+            # Generate summary
+            type_counts = {}
+            for gw in gateways:
+                for gw_type in gw["gateway_types"]:
+                    type_counts[gw_type] = type_counts.get(gw_type, 0) + 1
+
+            summary = f"Gateway detection complete: {len(gateways)} gateways found"
+            if type_counts:
+                summary += " - " + ", ".join(f"{k}: {v}" for k, v in type_counts.items())
+
+            logger.info(summary)
+
+            return {
+                "status": "success",
+                "gateways": gateways,
+                "total_gateways": len(gateways),
+                "by_type": type_counts,
+                "summary": summary
+            }
+
+        finally:
+            if xml_output.exists():
+                xml_output.unlink()
+
+    except Exception as e:
+        logger.error(f"Error during gateway detection: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
 
 
 def main():
